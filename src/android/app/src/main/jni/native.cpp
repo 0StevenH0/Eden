@@ -119,6 +119,23 @@ std::atomic<bool> g_has_battery = {true};
 // playtime
 std::unique_ptr<PlayTime::PlayTimeManager> play_time_manager;
 
+#ifdef ARCHITECTURE_arm64
+static std::shared_ptr<Common::DynamicLibrary> OpenSystemVulkanDriver(
+    [[maybe_unused]] const std::string& hook_lib_dir) {
+#ifdef EDEN_POCOPHONE_X7_PRO
+    auto library = std::make_shared<Common::DynamicLibrary>("libvulkan.so");
+    if (!library->IsOpen()) {
+        LOG_ERROR(Frontend, "Could not open the system Mali Vulkan loader");
+    }
+    return library;
+#else
+    auto handle = adrenotools_open_libvulkan(RTLD_NOW, 0, nullptr, hook_lib_dir.c_str(), nullptr,
+                                             nullptr, nullptr, nullptr);
+    return std::make_shared<Common::DynamicLibrary>(handle);
+#endif
+}
+#endif
+
 EmulationSession::EmulationSession() {
     m_vfs = std::make_shared<FileSys::RealVfsFilesystem>();
 }
@@ -160,10 +177,13 @@ void EmulationSession::SetNativeWindow(ANativeWindow* native_window) {
 }
 
 void EmulationSession::InitializeGpuDriver(const std::string& hook_lib_dir,
-                                           const std::string& custom_driver_dir,
-                                           const std::string& custom_driver_name,
-                                           const std::string& file_redirect_dir) {
-#ifdef ARCHITECTURE_arm64
+                                           [[maybe_unused]] const std::string& custom_driver_dir,
+                                           [[maybe_unused]] const std::string& custom_driver_name,
+                                           [[maybe_unused]] const std::string& file_redirect_dir) {
+#if defined(EDEN_POCOPHONE_X7_PRO)
+    m_vulkan_library = OpenSystemVulkanDriver(hook_lib_dir);
+    LOG_INFO(Frontend, "POCO X7 Pro profile: using the system Mali Vulkan driver");
+#elif defined(ARCHITECTURE_arm64)
     void* handle{};
     const char* file_redirect_dir_{};
     int featureFlags{};
@@ -842,7 +862,11 @@ void JNICALL Java_org_yuzu_yuzu_1emu_NativeLibrary_initializeGpuDriver(JNIEnv* e
 }
 
 [[maybe_unused]] bool SupportsCustomDriver() {
+#ifdef EDEN_POCOPHONE_X7_PRO
+    return false;
+#else
     return android_get_device_api_level() >= 28 && CheckKgslPresent();
+#endif
 }
 
 jboolean JNICALL Java_org_yuzu_yuzu_1emu_utils_GpuDriverHelper_supportsCustomDriverLoading(
@@ -858,12 +882,8 @@ jboolean JNICALL Java_org_yuzu_yuzu_1emu_utils_GpuDriverHelper_supportsCustomDri
 jobjectArray Java_org_yuzu_yuzu_1emu_utils_GpuDriverHelper_getSystemDriverInfo(
     JNIEnv* env, jobject j_obj, jobject j_surf, jstring j_hook_lib_dir) {
 #ifdef ARCHITECTURE_arm64
-    const char* file_redirect_dir_{};
-    int featureFlags{};
     std::string hook_lib_dir = Common::Android::GetJString(env, j_hook_lib_dir);
-    auto handle = adrenotools_open_libvulkan(RTLD_NOW, featureFlags, nullptr, hook_lib_dir.c_str(),
-                                             nullptr, nullptr, file_redirect_dir_, nullptr);
-    auto driver_library = std::make_shared<Common::DynamicLibrary>(handle);
+    auto driver_library = OpenSystemVulkanDriver(hook_lib_dir);
     InputCommon::InputSubsystem input_subsystem;
     auto window =
         std::make_unique<EmuWindow_Android>(ANativeWindow_fromSurface(env, j_surf), driver_library);
@@ -893,12 +913,8 @@ jobjectArray Java_org_yuzu_yuzu_1emu_utils_GpuDriverHelper_getSystemDriverInfo(
 
 jstring Java_org_yuzu_yuzu_1emu_utils_GpuDriverHelper_getGpuModel(JNIEnv *env, jobject j_obj, jobject j_surf, jstring j_hook_lib_dir) {
 #ifdef ARCHITECTURE_arm64
-    const char* file_redirect_dir_{};
-    int featureFlags{};
     std::string hook_lib_dir = Common::Android::GetJString(env, j_hook_lib_dir);
-    auto handle = adrenotools_open_libvulkan(RTLD_NOW, featureFlags, nullptr, hook_lib_dir.c_str(),
-                                             nullptr, nullptr, file_redirect_dir_, nullptr);
-    auto driver_library = std::make_shared<Common::DynamicLibrary>(handle);
+    auto driver_library = OpenSystemVulkanDriver(hook_lib_dir);
     InputCommon::InputSubsystem input_subsystem;
     auto window =
             std::make_unique<EmuWindow_Android>(ANativeWindow_fromSurface(env, j_surf), driver_library);

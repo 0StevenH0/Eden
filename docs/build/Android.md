@@ -1,5 +1,9 @@
 # Android
 
+This fork defaults to the POCO X7 Pro release build. See the
+[device guide](../PocoX7Pro.md) for its exact SDK versions, build commands, and
+testing requirements. The generic variants below are retained for reference.
+
 ## Dependencies
 
 * [Android Studio](https://developer.android.com/studio)

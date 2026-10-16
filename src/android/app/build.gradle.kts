@@ -36,7 +36,7 @@ android {
     namespace = "org.yuzu.yuzu_emu"
 
     compileSdkVersion = "android-36"
-    ndkVersion = "28.2.13676358"
+    ndkVersion = "29.0.14206865"
 
     val isNightly =
         providers.gradleProperty("nightly").orNull?.toBooleanStrictOrNull() ?: false
@@ -129,6 +129,7 @@ android {
     buildTypes {
         // Signed by release key, allowing for upload to Play Store.
         release {
+            isDefault = true
             signingConfig = if (keystoreFile != null) {
                 signingConfigs.getByName("release")
             } else {
@@ -153,7 +154,6 @@ android {
         // builds a release build that doesn't need signing
         // Attaches 'debug' suffix to version and package name, allowing installation alongside the release build.
         register("relWithDebInfo") {
-            isDefault = true
             signingConfig = signingConfigs.getByName("default")
             isDebuggable = true
             proguardFiles(
@@ -185,9 +185,34 @@ android {
     // this should be "Eden <flavorName>"
     flavorDimensions.add("version")
     productFlavors {
-        create("mainline") {
+        create("pocoX7Pro") {
             dimension = "version"
             isDefault = true
+            minSdk = 35
+            applicationId = "dev.steven.eden.pocox7pro"
+            versionNameSuffix = "-poco-x7-pro"
+            manifestPlaceholders += mapOf("appNameBase" to "Eden POCO X7 Pro")
+            resValue("string", "app_name_suffixed", "Eden POCO X7 Pro")
+
+            externalNativeBuild {
+                cmake {
+                    arguments.addAll(
+                        listOf(
+                            "-DEDEN_POCOPHONE_X7_PRO=ON",
+                            "-DENABLE_LTO=ON",
+                            "-DENABLE_UPDATE_CHECKER=OFF"
+                        )
+                    )
+                }
+            }
+
+            ndk {
+                abiFilters += listOf("arm64-v8a")
+            }
+        }
+
+        create("mainline") {
+            dimension = "version"
             minSdk = 33
 
             manifestPlaceholders += mapOf("appNameBase" to "Eden")

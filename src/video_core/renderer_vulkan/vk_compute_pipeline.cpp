@@ -113,8 +113,8 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
         try {
             pipeline = device.GetLogical().CreateComputePipeline(compute_ci, *pipeline_cache);
         } catch (const vk::Exception& exception) {
-            LOG_CRITICAL(Render_Vulkan, "Adreno rejected compute shader {:016X}: {}", shader_hash,
-                         exception.what());
+            LOG_CRITICAL(Render_Vulkan, "{} rejected compute shader {:016X}: {}",
+                         device.GetModelName(), shader_hash, exception.what());
             std::scoped_lock lock{build_mutex};
             is_built = true;
             build_condvar.notify_one();
