@@ -22,7 +22,7 @@ The app is labelled **Eden POCO X7 Pro**, with package `dev.steven.eden.pocox7pr
 It can be installed alongside upstream Eden; its settings, games list, and app data
 are separate. Import your data through the existing app import/export tools if needed.
 
-Use JDK 17, Android SDK 36, NDK `28.2.13676358` (r28c), and CMake `3.31.6`:
+Use JDK 17, Android SDK 36, NDK `29.0.14206865` (r29), and CMake `3.31.6`:
 
 ```sh
 .ci/android/build.sh

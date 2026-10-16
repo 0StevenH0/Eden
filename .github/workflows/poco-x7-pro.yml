@@ -59,9 +59,18 @@ jobs:
       - name: Install Android build tools
         run: >-
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-          'ndk;28.2.13676358' 'cmake;3.31.6'
+          'ndk;29.0.14206865' 'cmake;3.31.6'
       - name: Build POCO X7 Pro release
         run: .ci/android/build.sh -t poco -b Release -DYUZU_DOWNLOAD_ANDROID_VVL=OFF
+      - name: Show native configuration diagnostics
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for path in Path('src/android/app/.cxx').rglob('CMakeConfigureLog.yaml'):
+              print(path)
+              print(path.read_text()[-24000:])
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: eden-poco-x7-pro-${{ github.sha }}

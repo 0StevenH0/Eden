@@ -36,7 +36,7 @@ android {
     namespace = "org.yuzu.yuzu_emu"
 
     compileSdkVersion = "android-36"
-    ndkVersion = "28.2.13676358"
+    ndkVersion = "29.0.14206865"
 
     val isNightly =
         providers.gradleProperty("nightly").orNull?.toBooleanStrictOrNull() ?: false
