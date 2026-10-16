@@ -6,6 +6,7 @@ name: POCO X7 Pro Android
 on:
   workflow_dispatch:
   push:
+    branches: [master]
     paths:
       - 'src/**'
       - 'externals/**'
@@ -56,6 +57,10 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
+      - name: Install host shader compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends glslang-tools
       - name: Install Android build tools
         run: >-
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0'

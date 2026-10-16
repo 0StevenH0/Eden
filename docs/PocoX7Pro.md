@@ -22,7 +22,13 @@ The app is labelled **Eden POCO X7 Pro**, with package `dev.steven.eden.pocox7pr
 It can be installed alongside upstream Eden; its settings, games list, and app data
 are separate. Import your data through the existing app import/export tools if needed.
 
-Use JDK 17, Android SDK 36, NDK `29.0.14206865` (r29), and CMake `3.31.6`:
+Use JDK 17, Android SDK 36, NDK `29.0.14206865` (r29), and CMake `3.31.6`.
+
+Install a host `glslangValidator` for shader generation as well. On Ubuntu this is
+provided by `sudo apt-get install glslang-tools`; the Android cross compiler cannot
+replace this host tool.
+
+Build from the repository root:
 
 ```sh
 .ci/android/build.sh
