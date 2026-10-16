@@ -40,6 +40,9 @@ jobs:
     timeout-minutes: 120
     env:
       NUM_JOBS: '2'
+      CCACHE: 'true'
+      CCACHE_DIR: ${{ github.workspace }}/.cache/ccache
+      CCACHE_MAXSIZE: 2G
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,7 +63,17 @@ jobs:
       - name: Install host shader compiler
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends glslang-tools
+          sudo apt-get install --yes --no-install-recommends glslang-tools ccache
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        continue-on-error: true
+        with:
+          path: |
+            .cache/cpm
+            .cache/ccache
+          key: poco-ndk29-${{ runner.os }}-${{ hashFiles('cpmfile.json', '.patch/**', 'CMakeModules/PocoX7Pro.cmake') }}-${{ github.sha }}
+          restore-keys: |
+            poco-ndk29-${{ runner.os }}-${{ hashFiles('cpmfile.json', '.patch/**', 'CMakeModules/PocoX7Pro.cmake') }}-
       - name: Install Android build tools
         run: >-
           sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
@@ -76,6 +89,14 @@ jobs:
               print(path)
               print(path.read_text()[-24000:])
           PY
+      - uses: actions/cache/save@v4
+        if: always() && steps.native-cache.outputs.cache-primary-key != '' && steps.native-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        with:
+          path: |
+            .cache/cpm
+            .cache/ccache
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@v4
         with:
           name: eden-poco-x7-pro-${{ github.sha }}
