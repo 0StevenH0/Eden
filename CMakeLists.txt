@@ -321,7 +321,10 @@ if (UNIX AND NOT (LINUX OR WIN32))
 endif()
 
 # Build/optimization presets
-if (CXX_GCC OR CXX_CLANG)
+option(EDEN_POCOPHONE_X7_PRO "Prioritize the POCO X7 Pro (Dimensity 8400-Ultra / Mali-G720)" OFF)
+if (EDEN_POCOPHONE_X7_PRO)
+    include(PocoX7Pro)
+elseif (CXX_GCC OR CXX_CLANG)
     if (ARCHITECTURE_x86_64)
         # See https://gcc.gnu.org/onlinedocs/gcc/x86-Options.html
         # Generic supports Pentium Pro instruction set and above

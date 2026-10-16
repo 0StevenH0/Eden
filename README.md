@@ -7,6 +7,16 @@
 -->
 <!-- lang: en-GB -->
 
+## POCO X7 Pro fork
+
+This fork targets the **POCO X7 Pro** (Dimensity 8400-Ultra / Mali-G720) as its only
+optimization priority. See [the device build and testing guide](docs/PocoX7Pro.md).
+
+Build the default Android target with `.ci/android/build.sh`, or use the
+**POCO X7 Pro Android** GitHub Actions workflow. Device performance and game
+compatibility must be measured on the phone; the profile is not a guarantee that
+every game will work.
+
 <h1 align="center">
   <br>
   <a href="https://git.eden-emu.dev/eden-emu/eden"><img src="./dist/qt_themes/default/icons/256x256/eden.png" alt="Eden" width="200"></a>

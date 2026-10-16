@@ -501,7 +501,7 @@ struct Values {
                                          linkage, 0, "bg_blue", Category::Renderer, Specialization::Default, true, true};
 
     SwitchableSetting<GpuAccuracy, true> gpu_accuracy{linkage,
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && !defined(EDEN_POCOPHONE_X7_PRO)
                                                       GpuAccuracy::Low,
 #else
                                                       GpuAccuracy::High,
@@ -594,7 +594,7 @@ struct Values {
                                                 Category::RendererAdvanced};
 
     SwitchableSetting<bool> use_reactive_flushing{linkage,
-#ifdef __ANDROID__
+#if defined(__ANDROID__) && !defined(EDEN_POCOPHONE_X7_PRO)
                                                   false,
 #else
                                                   true,

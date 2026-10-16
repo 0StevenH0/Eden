@@ -3,7 +3,7 @@
 # SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-NUM_JOBS=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
+: "${NUM_JOBS:=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
 export CMAKE_BUILD_PARALLEL_LEVEL="${NUM_JOBS}"
 ARTIFACTS_DIR="$PWD/artifacts"
 
@@ -21,18 +21,18 @@ and will apply both to this script and the packaging script.
 bool values are "true" or "false"
 
 Options:
-    -r, --release        	Enable update checker. If set, sets the DEVEL bool variable to false.
-                         	By default, DEVEL is true.
-    -t, --target <FLAVOR> 	Build flavor (variable: TARGET)
-                          	Valid values are: legacy, optimized, standard, chromeos
-                          	Default: standard
-    -b, --build-type <TYPE>	Build type (variable: TYPE)
-                          	Valid values are: Release, RelWithDebInfo, Debug
-                          	Default: Debug
+    -r, --release          Enable update checker (disabled by the POCO profile).
+                            By default, DEVEL is true.
+    -t, --target <FLAVOR>   Build flavor (variable: TARGET)
+                            Valid values are: poco, legacy, optimized, standard, chromeos
+                            Default: poco (POCO X7 Pro)
+    -b, --build-type <TYPE> Build type (variable: TYPE)
+                            Valid values are: Release, RelWithDebInfo, Debug
+                            Default: Release
     -n, --nightly           Create a nightly build.
 
 Extra arguments are passed to CMake (e.g. -DCMAKE_OPTION_NAME=VALUE)
-Set the CCACHE variable to "true" to enable build caching.
+Set CCACHE to "true" for build caching; NUM_JOBS limits parallel build jobs.
 The APK and AAB will be output into "artifacts".
 
 EOF
@@ -70,13 +70,14 @@ while true; do
 	shift
 done
 
-: "${TARGET:=standard}"
+: "${TARGET:=poco}"
 : "${TYPE:=Release}"
 : "${DEVEL:=true}"
 
 TARGET_LOWER=$(echo "$TARGET" | tr '[:upper:]' '[:lower:]')
 
 case "$TARGET_LOWER" in
+    poco) FLAVOR=PocoX7Pro ;;
 	legacy) FLAVOR=Legacy ;;
 	optimized) FLAVOR=GenshinSpoof ;;
 	standard) FLAVOR=Mainline ;;

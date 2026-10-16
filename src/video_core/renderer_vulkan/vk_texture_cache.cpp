@@ -942,7 +942,8 @@ TextureCacheRuntime::TextureCacheRuntime(const Device& device_, Scheduler& sched
     : device{device_}, scheduler{scheduler_}, memory_allocator{memory_allocator_},
       staging_buffer_pool{staging_buffer_pool_}, blit_image_helper{blit_image_helper_},
       render_pass_cache{render_pass_cache_}, resolution{Settings::values.resolution_info} {
-    if (Settings::values.accelerate_astc.GetValue() == Settings::AstcDecodeMode::Gpu) {
+    if (!device.IsOptimalAstcSupported() &&
+        Settings::values.accelerate_astc.GetValue() == Settings::AstcDecodeMode::Gpu) {
         astc_decoder_pass.emplace(device, scheduler, descriptor_pool, staging_buffer_pool,
                                   compute_pass_descriptor_queue, memory_allocator);
     }

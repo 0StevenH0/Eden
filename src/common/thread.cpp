@@ -97,7 +97,11 @@ namespace {
 constexpr size_t ANDROID_MINIMUM_PERFORMANCE_CORES = 4;
 
 // A core counts as a performance core while it is within this much of the fastest one.
+#ifdef EDEN_POCOPHONE_X7_PRO
+constexpr s64 ANDROID_PERFORMANCE_CAPACITY_PERCENT = 90;
+#else
 constexpr s64 ANDROID_PERFORMANCE_CAPACITY_PERCENT = 50;
+#endif
 
 constexpr std::chrono::nanoseconds ANDROID_POLICY_POLL_INTERVAL = std::chrono::milliseconds{500};
 
@@ -252,8 +256,9 @@ void ComputeTopologyLocked(CpuTopologyState& state) {
 
     const s32 total = PossibleCpuCount();
     auto cores = CollectCores(state.allowed, total, "cpu_capacity", true);
-    if (cores.empty() || (WeightsAreUniform(cores) && MidrsAreDistinct(cores))) {
-        auto by_frequency = CollectCores(state.allowed, total, "cpufreq/cpuinfo_max_freq", false);
+    // Identical CPU models can still belong to different frequency clusters (Dimensity 8400).
+    if (cores.empty() || WeightsAreUniform(cores)) {
+        auto by_frequency = CollectCores(state.allowed, total, "cpufreq/cpuinfo_max_freq", true);
         if (!by_frequency.empty()) {
             cores = std::move(by_frequency);
         }
