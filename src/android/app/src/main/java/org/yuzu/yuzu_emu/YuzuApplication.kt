@@ -19,6 +19,7 @@ import javax.net.ssl.X509TrustManager
 import android.content.res.Configuration
 import android.os.LocaleList
 import org.yuzu.yuzu_emu.features.settings.model.IntSetting
+import org.yuzu.yuzu_emu.utils.CrashDiagnostics
 import org.yuzu.yuzu_emu.utils.DirectoryInitialization
 import org.yuzu.yuzu_emu.utils.DocumentsTree
 import org.yuzu.yuzu_emu.utils.GpuDriverHelper
@@ -60,6 +61,7 @@ class YuzuApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         application = this
+        CrashDiagnostics.start(this)
         documentsTree = DocumentsTree()
         DirectoryInitialization.start()
 

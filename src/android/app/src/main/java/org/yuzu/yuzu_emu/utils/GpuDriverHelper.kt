@@ -6,10 +6,8 @@
 
 package org.yuzu.yuzu_emu.utils
 
-import android.graphics.SurfaceTexture
 import android.net.Uri
 import android.os.Build
-import android.view.Surface
 import java.io.File
 import java.io.IOException
 import org.yuzu.yuzu_emu.NativeLibrary
@@ -208,15 +206,9 @@ object GpuDriverHelper {
 
     external fun supportsCustomDriverLoading(): Boolean
 
-    external fun getSystemDriverInfo(
-        surface: Surface = Surface(SurfaceTexture(true)),
-        hookLibPath: String = GpuDriverHelper.hookLibPath!!
-    ): Array<String>?
+    external fun getSystemDriverInfo(): Array<String>?
 
-    external fun getGpuModel(
-        surface: Surface = Surface(SurfaceTexture(true)),
-        hookLibPath: String
-    ): String?
+    external fun getGpuModel(): String?
 
     fun isAdrenoGpu(): Boolean {
         return try {

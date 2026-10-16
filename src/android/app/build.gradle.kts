@@ -69,6 +69,7 @@ android {
         targetSdk = 36
         versionName = getGitVersion()
         versionCode = autoVersion
+        buildConfigField("String", "GIT_REVISION", "\"${runGitCommand(listOf("git", "rev-parse", "HEAD"))}\"")
 
         externalNativeBuild {
             cmake {
@@ -130,6 +131,7 @@ android {
         // Signed by release key, allowing for upload to Play Store.
         release {
             isDefault = true
+            ndk.debugSymbolLevel = "SYMBOL_TABLE"
             signingConfig = if (keystoreFile != null) {
                 signingConfigs.getByName("release")
             } else {

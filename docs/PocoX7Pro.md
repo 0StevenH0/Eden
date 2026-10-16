@@ -135,3 +135,66 @@ Export the existing Eden log after a failing run. A game name plus the log is ne
 to distinguish a shader compiler failure, an unsupported feature, memory exhaustion,
 or a CPU/emulation issue. This profile cannot promise to fix all games merely by
 changing the build target.
+
+
+## Mali stability patch
+
+The vertex-input path now queries and enables the divisor feature bits, and checks
+`maxVertexAttribDivisor`. Ordinary instancing (divisor 1) uses core Vulkan without
+attaching `VK_EXT_vertex_attribute_divisor` state. Only bindings referenced by
+active attributes are emitted. Zero divisors remain instance-rate bindings and
+require both divisor feature bits; they are not treated as per-vertex input.
+Unsupported static pipelines and dynamic draws are skipped with an error before
+submitting invalid vertex-input state. Repeated rejected dynamic draws remain
+invalid until the guest changes their input state.
+
+This is a compatibility guard, not software emulation of missing instancing
+features. Games requiring unsupported zero or larger divisors can still have
+missing geometry or fail to render. The existing capability warnings remain;
+this patch does not supply Mali's other missing Vulkan features. The supplied
+logs did not contain a crash stack, so this does not establish the crash cause.
+
+GPU model and system-driver queries now read and cache physical-device metadata
+without creating an Android surface, input subsystem, or renderer device. This
+also removes the leaked window from the old GPU-model query. Failed queries
+return a fallback and can be retried; successful queries are cached per process.
+No FPS or device-memory improvement has been measured.
+
+On Android 11/API 30 and newer, startup collects the four most recent Android
+process-exit records on an IO worker. After a crash, reopen the app and choose
+**Share log**. It packages the selected Eden log, `android_exit_info.txt`, and any
+available traces into `eden_diagnostics.zip`. Native traces on Android 12 and newer
+are protobuf `.pb` tombstones; other traces are text. Each trace is limited to
+8 MiB. Oversized traces are omitted and labelled, rather than truncated into an
+invalid protobuf. Older trace files are pruned. Android may have no trace available;
+exit reasons and sampled PSS/RSS remain useful but do not prove the cause by
+themselves. The report identifies its collection time and build. Startup and game transitions
+also attach the exact Git revision, phase, and title ID to Android's exit record;
+older builds may have no such session metadata. No per-frame logging is added.
+
+Validation of this patch in the development container: extracted production
+vertex-input and metadata-query code passed host C++ harness checks with address
+and undefined-behavior sanitizers (Vulkan/engine calls mocked; leak detection was
+unavailable in the container). Cases cover ordinary and zero divisors, capability
+limits, unused bindings, repeated rejection and recovery, driver-properties
+fallbacks, caching, and cleanup after failed queries. This does not compile the
+whole app or validate JNI/Android behavior. The Android release build could not
+start because the Gradle distribution, SDK, and NDK were unavailable and the
+Gradle download failed with `Network is unreachable`. Kotlin compilation,
+Android exit collection/export, and the actual Mali driver still need validation.
+
+Build the same `assemblePocoX7ProRelease` target before installing. Reproduce the
+same failing scene with the existing settings first, reopen after a failure, and
+export the diagnostic ZIP. Then compare Accurate and Fast GPU modes separately,
+and reactive flushing separately, keeping resolution and caches consistent. A
+missing-divisor message calls for a renderer fallback; a native crash trace or
+Android low-memory exit points to a different next investigation.
+
+
+GitHub Actions also retains `eden-poco-debug-<commit>` for 90 days. It contains
+native function symbols (`SYMBOL_TABLE`), the Java/R8 mapping, and a build manifest
+with APK checksums and the native build ID. The collection step verifies that the
+symbol file and the APK have the same native build ID. Keep this artifact for any
+APK used in extended testing: stripped release APKs alone cannot recover function
+names. These symbols support tombstones; source file/line information is not
+promised by this symbol level. The release APK remains optimized and non-debuggable.

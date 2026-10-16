@@ -23,10 +23,12 @@ import androidx.core.view.updatePadding
 import androidx.documentfile.provider.DocumentFile
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.activityViewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.findNavController
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.GridLayoutManager
 import com.google.android.material.transition.MaterialSharedAxis
+import kotlinx.coroutines.launch
 import org.yuzu.yuzu_emu.HomeNavigationDirections
 import org.yuzu.yuzu_emu.NativeLibrary
 import org.yuzu.yuzu_emu.R
@@ -41,6 +43,7 @@ import org.yuzu.yuzu_emu.model.DriverViewModel
 import org.yuzu.yuzu_emu.model.HomeSetting
 import org.yuzu.yuzu_emu.model.HomeViewModel
 import org.yuzu.yuzu_emu.ui.main.MainActivity
+import org.yuzu.yuzu_emu.utils.CrashDiagnostics
 import org.yuzu.yuzu_emu.utils.FileUtil
 import org.yuzu.yuzu_emu.utils.GpuDriverHelper
 import org.yuzu.yuzu_emu.utils.Log
@@ -483,21 +486,32 @@ class HomeSettingsFragment : Fragment() {
             )
         )!!
 
-        val intent = Intent(Intent.ACTION_SEND)
-            .setDataAndType(currentLog.uri, FileUtil.TEXT_PLAIN)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        if (!Log.gameLaunched && oldLog.exists()) {
-            intent.putExtra(Intent.EXTRA_STREAM, oldLog.uri)
+        val selectedLog = when {
+            !Log.gameLaunched && oldLog.exists() -> oldLog
+            currentLog.exists() -> currentLog
+            else -> {
+                Toast.makeText(mainActivity, R.string.share_log_missing, Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+        val logName = selectedLog.name ?: return
+        viewLifecycleOwner.lifecycleScope.launch {
+            val bundle = CrashDiagnostics.createLogBundle(mainActivity, logName)
+            if (!isAdded) return@launch
+            val uri = if (bundle != null) {
+                DocumentsContract.buildDocumentUri(
+                    DocumentProvider.AUTHORITY,
+                    "${DocumentProvider.ROOT_ID}/log/${bundle.name}"
+                )
+            } else {
+                selectedLog.uri
+            }
+            val type = if (bundle != null) "application/zip" else FileUtil.TEXT_PLAIN
+            val intent = Intent(Intent.ACTION_SEND)
+                .setDataAndType(uri, type)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .putExtra(Intent.EXTRA_STREAM, uri)
             startActivity(Intent.createChooser(intent, getText(R.string.share_log)))
-        } else if (currentLog.exists()) {
-            intent.putExtra(Intent.EXTRA_STREAM, currentLog.uri)
-            startActivity(Intent.createChooser(intent, getText(R.string.share_log)))
-        } else {
-            Toast.makeText(
-                requireContext(),
-                getText(R.string.share_log_missing),
-                Toast.LENGTH_SHORT
-            ).show()
         }
     }
 

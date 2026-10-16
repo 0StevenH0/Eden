@@ -899,6 +899,25 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
         }
         previous_stage = &program;
     }
+    if (!key.state.dynamic_vertex_input && infos[0]) {
+        for (size_t index = 0; index < key.state.attributes.size(); ++index) {
+            const auto& attribute = key.state.attributes[index];
+            if (!attribute.enabled || !infos[0]->loads.Generic(index)) {
+                continue;
+            }
+            const u32 binding = attribute.buffer;
+            const bool instanced = (key.state.enabled_divisors & (1ULL << binding)) != 0;
+            if (instanced &&
+                !device.IsVertexAttributeDivisorSupported(key.state.binding_divisors[binding])) {
+                LOG_ERROR(Render_Vulkan,
+                          "Skipping graphics pipeline {:016X}: binding {} requires unsupported "
+                          "instance divisor {} on {}",
+                          key.Hash(), binding, key.state.binding_divisors[binding],
+                          device.GetModelName());
+                return nullptr;
+            }
+        }
+    }
     Common::ThreadWorker* const thread_worker{build_in_parallel ? &workers : nullptr};
     return std::make_unique<GraphicsPipeline>(
         scheduler, buffer_cache, texture_cache, vulkan_pipeline_cache, &shader_notify, device,

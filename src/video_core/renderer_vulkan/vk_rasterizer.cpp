@@ -250,6 +250,9 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
     pipeline->SetEngine(maxwell3d, gpu_memory);
     if (!pipeline->Configure(is_indexed))
         return;
+    if (pipeline->HasDynamicVertexInput() && !UpdateVertexInput(maxwell3d->regs)) {
+        return;
+    }
 
     UpdateDynamicStates();
 
@@ -1136,12 +1139,6 @@ void RasterizerVulkan::UpdateDynamicStates() {
     } else if (device.IsExtColorWriteEnableSupported()) {
         UpdateColorWriteEnable(regs);
     }
-
-    if (device.IsExtVertexInputDynamicStateSupported()) {
-        if (auto* gp = pipeline_cache.CurrentGraphicsPipeline(); gp && gp->HasDynamicVertexInput()) {
-            UpdateVertexInput(regs);
-        }
-    }
 }
 
 void RasterizerVulkan::HandleTransformFeedback() {
@@ -1879,14 +1876,13 @@ void RasterizerVulkan::UpdateStencilTestEnable(Tegra::Engines::Maxwell3D::Regs& 
     });
 }
 
-void RasterizerVulkan::UpdateVertexInput(Tegra::Engines::Maxwell3D::Regs& regs) {
+bool RasterizerVulkan::UpdateVertexInput(Tegra::Engines::Maxwell3D::Regs& regs) {
     auto& dirty{maxwell3d->dirty.flags};
     const bool vertex_input_dirty = dirty[Dirty::VertexInput];
     const bool vertex_buffers_dirty = dirty[VideoCommon::Dirty::VertexBuffers];
     if (!vertex_input_dirty && !vertex_buffers_dirty) {
-        return;
+        return true;
     }
-    dirty[Dirty::VertexInput] = false;
 
     boost::container::static_vector<VkVertexInputBindingDescription2EXT, 32> bindings;
     boost::container::static_vector<VkVertexInputAttributeDescription2EXT, 32> attributes;
@@ -1915,9 +1911,27 @@ void RasterizerVulkan::UpdateVertexInput(Tegra::Engines::Maxwell3D::Regs& regs) 
         });
     }
 
+    u32 used_bindings{};
+    for (const auto& attribute : attributes) {
+        used_bindings |= 1U << attribute.binding;
+    }
     for (u32 binding = 0; binding < max_bindings; ++binding) {
+        if ((used_bindings & (1U << binding)) == 0) {
+            continue;
+        }
         const auto& input_binding{regs.vertex_streams[binding]};
         const bool is_instanced{regs.vertex_stream_instances.IsInstancingEnabled(binding)};
+        if (is_instanced && !device.IsVertexAttributeDivisorSupported(input_binding.frequency)) {
+            static std::once_flag warn_unsupported_divisor;
+            std::call_once(warn_unsupported_divisor, [&] {
+                LOG_ERROR(Render_Vulkan,
+                          "Skipping draw: binding {} requires unsupported instance divisor {} on {}",
+                          binding, input_binding.frequency, device.GetModelName());
+            });
+            // Keep the state dirty so subsequent draws cannot reuse an older valid setup.
+            dirty[Dirty::VertexInput] = true;
+            return false;
+        }
         bindings.push_back({
             .sType = VK_STRUCTURE_TYPE_VERTEX_INPUT_BINDING_DESCRIPTION_2_EXT,
             .pNext = nullptr,
@@ -1935,9 +1949,11 @@ void RasterizerVulkan::UpdateVertexInput(Tegra::Engines::Maxwell3D::Regs& regs) 
         dirty[Dirty::VertexBinding0 + index] = false;
     }
 
+    dirty[Dirty::VertexInput] = false;
     scheduler.Record([bindings, attributes](vk::CommandBuffer cmdbuf) {
         cmdbuf.SetVertexInputEXT(bindings, attributes);
     });
+    return true;
 }
 
 void RasterizerVulkan::InitializeChannel(Tegra::Control::ChannelState& channel) {

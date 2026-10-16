@@ -693,8 +693,18 @@ void GraphicsPipeline::MakePipeline(VkRenderPass render_pass) {
     if (!key.state.dynamic_vertex_input) {
         const size_t num_vertex_arrays = (std::min)(
             Maxwell::NumVertexArrays, static_cast<size_t>(device.GetMaxVertexInputBindings()));
+        u32 used_bindings{};
+        for (size_t index = 0; index < key.state.attributes.size(); ++index) {
+            const auto& attribute = key.state.attributes[index];
+            if (attribute.enabled && stage_infos[0].loads.Generic(index)) {
+                used_bindings |= 1U << attribute.buffer;
+            }
+        }
         for (size_t index = 0; index < num_vertex_arrays; ++index) {
-            const bool instanced = key.state.binding_divisors[index] != 0;
+            if ((used_bindings & (1U << index)) == 0) {
+                continue;
+            }
+            const bool instanced = (key.state.enabled_divisors & (1ULL << index)) != 0;
             const auto rate =
                 instanced ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX;
             vertex_bindings.push_back({
@@ -702,7 +712,8 @@ void GraphicsPipeline::MakePipeline(VkRenderPass render_pass) {
                 .stride = key.state.vertex_strides[index],
                 .inputRate = rate,
             });
-            if (instanced) {
+            // Divisor one is core Vulkan instancing; no extension structure is needed.
+            if (instanced && key.state.binding_divisors[index] != 1) {
                 vertex_binding_divisors.push_back({
                     .binding = static_cast<u32>(index),
                     .divisor = key.state.binding_divisors[index],

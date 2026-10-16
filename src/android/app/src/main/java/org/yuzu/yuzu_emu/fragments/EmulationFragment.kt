@@ -67,6 +67,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.yuzu.yuzu_emu.HomeNavigationDirections
 import org.yuzu.yuzu_emu.NativeLibrary
+import org.yuzu.yuzu_emu.YuzuApplication
 import org.yuzu.yuzu_emu.R
 import org.yuzu.yuzu_emu.activities.EmulationActivity
 import org.yuzu.yuzu_emu.databinding.DialogOverlayAdjustBinding
@@ -85,6 +86,7 @@ import org.yuzu.yuzu_emu.model.EmulationViewModel
 import org.yuzu.yuzu_emu.model.Game
 import org.yuzu.yuzu_emu.overlay.model.OverlayControl
 import org.yuzu.yuzu_emu.overlay.model.OverlayLayout
+import org.yuzu.yuzu_emu.utils.CrashDiagnostics
 import org.yuzu.yuzu_emu.utils.DirectoryInitialization
 import org.yuzu.yuzu_emu.utils.FileUtil
 import org.yuzu.yuzu_emu.utils.GameHelper
@@ -360,7 +362,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
             Log.warning("[EmulationFragment] Failed to load Freedreno config: ${e.message}")
         }
 
-        emulationState = EmulationState(game!!.path) {
+        emulationState = EmulationState(game!!.path, game!!.programIdHex) {
             return@EmulationState driverViewModel.isInteractionAllowed.value &&
                 !isStoppingForRomSwap
         }
@@ -673,7 +675,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         }
         Log.info("[EmulationFragment] Starting view setup for game: ${game?.title}")
 
-        gpuModel = GpuDriverHelper.hookLibPath?.let { GpuDriverHelper.getGpuModel(hookLibPath = it).toString() } ?: "Unknown"
+        gpuModel = GpuDriverHelper.getGpuModel() ?: "Unknown"
         fwVersion = NativeLibrary.firmwareVersion()
 
         val buildVersion = NativeLibrary.getBuildVersion()
@@ -2273,6 +2275,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
     private class EmulationState(
         private val gamePath: String,
+        private val programId: String,
         private val emulationCanStart: () -> Boolean
     ) {
         private var state: State
@@ -2365,7 +2368,11 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
             emulationThread.join()
             emulationThread = Thread({
                 Log.debug("[EmulationFragment] Starting emulation thread.")
+                CrashDiagnostics.recordSession(
+                    YuzuApplication.appContext, "game-$programIndex", programId
+                )
                 NativeLibrary.run(gamePath, programIndex, false)
+                CrashDiagnostics.recordSession(YuzuApplication.appContext, "idle")
             }, "NativeEmulation")
             emulationThread.start()
         }
@@ -2432,7 +2439,11 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
                     NativeLibrary.surfaceChanged(currentSurface)
                     emulationThread = Thread({
                         Log.debug("[EmulationFragment] Starting emulation thread.")
+                        CrashDiagnostics.recordSession(
+                            YuzuApplication.appContext, "game-$programIndex", programId
+                        )
                         NativeLibrary.run(gamePath, programIndex, true)
+                        CrashDiagnostics.recordSession(YuzuApplication.appContext, "idle")
                     }, "NativeEmulation")
                     emulationThread.start()
                     state = State.RUNNING

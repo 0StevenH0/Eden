@@ -6,7 +6,7 @@ name: POCO X7 Pro Android
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [master, codex/poco-mali-stability]
     paths:
       - 'src/**'
       - 'externals/**'
@@ -80,6 +80,8 @@ jobs:
           'ndk;29.0.14206865' 'cmake;3.31.6'
       - name: Build POCO X7 Pro release
         run: .ci/android/build.sh -t poco -b Release -DYUZU_DOWNLOAD_ANDROID_VVL=OFF
+      - name: Collect matching crash-debug artifacts
+        run: python3 .ci/android/collect-debug-artifacts.py
       - name: Show native configuration diagnostics
         if: failure()
         run: |
@@ -105,3 +107,10 @@ jobs:
             artifacts/*.aab
           if-no-files-found: error
           retention-days: 14
+      - name: Upload matching debug symbols
+        uses: actions/upload-artifact@v4
+        with:
+          name: eden-poco-debug-${{ github.sha }}
+          path: artifacts/debug/*
+          if-no-files-found: error
+          retention-days: 90
