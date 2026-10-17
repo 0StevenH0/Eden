@@ -195,19 +195,20 @@ void ShortRead() {
           "late samples did not complete the original buffer");
 }
 
-void SampleCountLeadIsGameSpecific() {
+void AudioTelemetryAndDefaultLead() {
     Core::System system;
-    SinkStream out(system, StreamType::Out);
-    Check(out.GetExpectedPlayedSampleCount() == TargetSampleCount * 5,
-          "other titles must retain their default audio lead");
-
     system.program_id = 0x010069401ADB8000ULL;
-    Check(out.GetExpectedPlayedSampleCount() == TargetSampleCount * 25,
-          "Unicorn Overlord must use the experimental audio lead");
-
-    SinkStream in(system, StreamType::In);
-    Check(in.GetExpectedPlayedSampleCount() == TargetSampleCount * 5,
-          "audio input must retain the default lead");
+    SinkStream sink(system, StreamType::Out);
+    Check(sink.GetExpectedPlayedSampleCount() == TargetSampleCount * 5,
+          "Unicorn Overlord experiment must be reverted");
+    Append(sink, {10, 20, 30, 40});
+    Check(sink.GetAppendedFrames() == 2, "appended frame counter incorrect");
+    std::vector<s16> output(8);
+    sink.ProcessAudioOutAndRender(output, 4);
+    Check(sink.GetRequestedFrames() == 4 && sink.GetDeliveredFrames() == 2,
+          "requested/delivered telemetry incorrect");
+    Check(sink.GetUnderrunFrames() == 2 && sink.GetUnderrunCallbackCount() == 1,
+          "underrun diagnostics incorrect");
 }
 
 void NoAdditionalData() {
@@ -278,7 +279,7 @@ int main() {
     run("surround downmix handoff", [] { Handoff(6, {100, 200, 0, 0, 0, 0}, {100, 200}); });
     run("partial-buffer underrun", Underrun);
     run("short read and recovery", ShortRead);
-    run("Unicorn Overlord-only sample lead", SampleCountLeadIsGameSpecific);
+    run("audio telemetry and default lead", AudioTelemetryAndDefaultLead);
     run("SDL zero additional request", NoAdditionalData);
 #if HAS_COUNTERS
     run("SDL frame alignment and storage reuse", AlignedRequestAndReuse);
