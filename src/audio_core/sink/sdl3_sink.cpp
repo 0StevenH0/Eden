@@ -4,6 +4,8 @@
 // SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -170,6 +172,10 @@ public:
         }
         SignalPause();
         static_cast<void>(SDL_PauseAudioStreamDevice(stream));
+        if (type != StreamType::In) {
+            LOG_INFO(Audio_Sink, "SDL stream {} stopped: underrun frames {}, short reads {}",
+                     static_cast<const void*>(stream), GetUnderrunFrames(), GetShortReadCount());
+        }
     }
 
 private:
@@ -179,10 +185,11 @@ private:
      *
      * @param userdata - Custom data pointer passed along, points to a SDLSinkStream.
      * @param stream   - Buffer of samples to be filled or read.
-     * @param len      - Length of the stream in bytes.
+     * @param additional_amount - Extra bytes needed in the stream's input format.
+     * @param total_amount - Total requested bytes, including audio already queued in SDL.
      */
     static void DataCallback(void* userdata, SDL_AudioStream* stream, int additional_amount,
-                             int total_amount) {
+                             [[maybe_unused]] int total_amount) {
         auto* impl = static_cast<SDLSinkStream*>(userdata);
 
         if (!impl) {
@@ -191,6 +198,10 @@ private:
 
         const std::size_t num_channels = impl->GetDeviceChannels();
         const std::size_t frame_size = num_channels;
+        const std::size_t frame_size_bytes = frame_size * sizeof(s16);
+        if (frame_size == 0) {
+            return;
+        }
 
         if (impl->type == StreamType::In) {
             const int bytes_available = SDL_GetAudioStreamAvailable(stream);
@@ -198,8 +209,15 @@ private:
                 return;
             }
 
-            std::vector<s16> input(bytes_available / static_cast<int>(sizeof(s16)));
-            const int bytes_read = SDL_GetAudioStreamData(stream, input.data(), bytes_available);
+            const std::size_t available_frames =
+                static_cast<std::size_t>(bytes_available) / frame_size_bytes;
+            if (available_frames == 0) {
+                return;
+            }
+            auto& input = impl->callback_buffer;
+            input.resize(available_frames * frame_size);
+            const int bytes_read = SDL_GetAudioStreamData(
+                stream, input.data(), static_cast<int>(input.size() * sizeof(s16)));
             if (bytes_read <= 0) {
                 return;
             }
@@ -207,25 +225,31 @@ private:
             const std::size_t num_frames =
                 static_cast<std::size_t>(bytes_read) / sizeof(s16) / frame_size;
             std::span<const s16> input_buffer{input.data(),
-                                              static_cast<std::size_t>(bytes_read) / sizeof(s16)};
+                                             static_cast<std::size_t>(bytes_read) / sizeof(s16)};
             impl->ProcessAudioIn(input_buffer, num_frames);
         } else {
-            if (additional_amount <= 0 && total_amount <= 0) {
+            if (additional_amount <= 0) {
                 return;
             }
 
-            const int bytes_requested = additional_amount > 0 ? additional_amount : total_amount;
-            std::vector<s16> output(bytes_requested / static_cast<int>(sizeof(s16)));
-            const std::size_t num_frames =
-                static_cast<std::size_t>(bytes_requested) / sizeof(s16) / frame_size;
+            // SDL may overestimate the byte request. Supply complete frames only.
+            const std::size_t num_frames = std::min(
+                (static_cast<std::size_t>(additional_amount) + frame_size_bytes - 1) /
+                    frame_size_bytes,
+                static_cast<std::size_t>(std::numeric_limits<int>::max()) / frame_size_bytes);
+            auto& output = impl->callback_buffer;
+            output.resize(num_frames * frame_size);
             std::span<s16> output_buffer{output.data(), output.size()};
             impl->ProcessAudioOutAndRender(output_buffer, num_frames);
-            static_cast<void>(SDL_PutAudioStreamData(stream, output.data(), bytes_requested));
+            static_cast<void>(SDL_PutAudioStreamData(
+                stream, output.data(), static_cast<int>(output.size() * sizeof(s16))));
         }
     }
 
     /// SDL stream attached to an opened input/output device
     SDL_AudioStream* stream{};
+    /// Reuse callback storage; larger device requests grow it only when necessary.
+    std::vector<s16> callback_buffer = std::vector<s16>(TargetSampleCount * MaxChannels * 2);
 };
 
 SDLSink::SDLSink(std::string_view target_device_name) {

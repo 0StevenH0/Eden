@@ -230,3 +230,43 @@ resolution and similar phone temperature, testing cold and warm caches
 separately. Export a new diagnostic ZIP after any crash. If return-address
 authentication still fails, investigate that trace independently instead of
 disabling authentication or broad CPU optimizations.
+
+The subsequent `6555ede` Android release built successfully in GitHub Actions.
+Its optimized ARM64 library retains the TLS accessor across the inspected wait
+path, and the user reports that Unicorn Overlord now reaches playable gameplay.
+This is a limited device result, not a sustained performance benchmark or proof
+that all crash paths are fixed.
+
+## Audio delivery and crackling
+
+Unicorn Overlord's reported crackling prompted fixes to the audio sink. The
+producer now publishes a buffer descriptor only after its samples and queue count
+are ready. Short reads advance playback only by the frames actually copied, and
+underruns hold the most recently delivered frame rather than a previous callback's
+frame. These changes prevent premature consumption and stale output samples.
+
+The SDL callback supplies complete PCM frames only when SDL requests additional
+data. It reuses storage across callbacks, growing it only for larger requests.
+This avoids repeated temporary allocations without increasing the audio queue or
+changing the Android driver, audio gain, NCE, LTO, or Cortex-A725 tuning. Phone CPU
+cost and audible improvement still require device testing.
+
+Run the focused host regression checks with:
+
+```sh
+python3 .ci/android/test-audio-sink.py --sanitize
+```
+
+The harness compiles the production sink methods and real queue containers with
+Core/SDL stand-ins. It exercises a producer/consumer publication boundary, short
+reads, underrun padding, SDL byte requests, storage reuse, pausing, and capture.
+The original code fails six checks; the patched code passes all eight, including
+AddressSanitizer and UndefinedBehaviorSanitizer. This does not test Android audio
+driver timing. The POCO workflow runs the host checks before building the APK.
+
+Compare the same scene and settings on the phone. After reproducing crackling,
+exit to the game list and choose **Share log**. Stopping an SDL output stream now
+logs cumulative `underrun frames` and `short reads`; no callback logging is added.
+Underruns can also occur during startup or slow emulation, so their totals alone
+do not establish the cause of a particular pop. A recording and the corresponding
+log help separate delivery starvation from other mixing or decoding problems.

@@ -57,7 +57,6 @@ void SinkStream::AppendBuffer(SinkBuffer& buffer, std::span<s16> samples) {
             samples[w_offs + 1] = s16(std::clamp(s32(right * volume), min, max));
         }
 
-        queue.EmplaceWait(buffer);
         samples_buffer.Push(samples.subspan(0, samples.size() / system_channels * device_channels));
     } else if (system_channels < device_channels) {
         std::vector<s16> new_samples(samples.size() / system_channels * device_channels);
@@ -65,7 +64,6 @@ void SinkStream::AppendBuffer(SinkBuffer& buffer, std::span<s16> samples) {
             for (u32 channel = 0; channel < system_channels; ++channel)
                 new_samples[w_offs + channel] = s16(std::clamp(s32(f32(samples[r_offs + channel]) * volume), min, max));
 
-        queue.EmplaceWait(buffer);
         samples_buffer.Push(new_samples);
     } else {
         if (volume != 1.0f) {
@@ -73,11 +71,12 @@ void SinkStream::AppendBuffer(SinkBuffer& buffer, std::span<s16> samples) {
                 samples[i] = s16(std::clamp(s32(f32(samples[i]) * volume), min, max));
         }
 
-        queue.EmplaceWait(buffer);
         samples_buffer.Push(samples);
     }
 
+    // Publish the descriptor only after its samples and queue count are ready.
     ++queued_buffers;
+    queue.EmplaceWait(buffer);
 }
 
 std::vector<s16> SinkStream::ReleaseBuffer(u64 num_samples) {
@@ -165,6 +164,10 @@ void SinkStream::ProcessAudioIn(std::span<const s16> input_buffer, std::size_t n
 }
 
 void SinkStream::ProcessAudioOutAndRender(std::span<s16> output_buffer, std::size_t num_frames) {
+    if (num_frames == 0) {
+        return;
+    }
+
     const std::size_t num_channels = GetDeviceChannels();
     const std::size_t frame_size = num_channels;
     const std::size_t frame_size_bytes = frame_size * sizeof(s16);
@@ -187,11 +190,7 @@ void SinkStream::ProcessAudioOutAndRender(std::span<s16> output_buffer, std::siz
             std::unique_lock lk{release_mutex};
 
             if (!queue.TryPop(playing_buffer)) {
-                lk.unlock();
-                for (size_t i = frames_written; i < num_frames; i++)
-                    std::memcpy(&output_buffer[i * frame_size], last_frame.data(), frame_size_bytes);
-                frames_written = num_frames;
-                continue;
+                break;
             }
 
             --queued_buffers;
@@ -201,17 +200,33 @@ void SinkStream::ProcessAudioOutAndRender(std::span<s16> output_buffer, std::siz
 
         const size_t frames_available = std::min<u64>(playing_buffer.frames - playing_buffer.frames_played, num_frames - frames_written);
 
-        samples_buffer.Pop(&output_buffer[frames_written * frame_size], frames_available * frame_size);
+        const size_t samples_read = samples_buffer.Pop(
+            &output_buffer[frames_written * frame_size], frames_available * frame_size);
+        const size_t frames_read = samples_read / frame_size;
 
-        frames_written += frames_available;
-        actual_frames_written += frames_available;
-        playing_buffer.frames_played += frames_available;
+        frames_written += frames_read;
+        actual_frames_written += frames_read;
+        playing_buffer.frames_played += frames_read;
 
         if (playing_buffer.frames_played >= playing_buffer.frames)
             playing_buffer.consumed = true;
+
+        if (samples_read != frames_available * frame_size) {
+            short_reads.fetch_add(1, std::memory_order_relaxed);
+            break;
+        }
     }
 
-    std::memcpy(last_frame.data(), &output_buffer[(frames_written - 1) * frame_size], frame_size_bytes);
+    if (frames_written > 0) {
+        std::memcpy(last_frame.data(), &output_buffer[(frames_written - 1) * frame_size],
+                    frame_size_bytes);
+    }
+    if (frames_written < num_frames) {
+        underrun_frames.fetch_add(num_frames - frames_written, std::memory_order_relaxed);
+        for (size_t i = frames_written; i < num_frames; i++) {
+            std::memcpy(&output_buffer[i * frame_size], last_frame.data(), frame_size_bytes);
+        }
+    }
 
     {
         std::scoped_lock lk{sample_count_lock};

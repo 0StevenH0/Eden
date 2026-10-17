@@ -160,6 +160,14 @@ public:
         return queued_buffers.load();
     }
 
+    u64 GetUnderrunFrames() const {
+        return underrun_frames.load(std::memory_order_relaxed);
+    }
+
+    u64 GetShortReadCount() const {
+        return short_reads.load(std::memory_order_relaxed);
+    }
+
     /**
      * Set the maximum buffer queue size.
      */
@@ -247,6 +255,9 @@ private:
     std::array<s16, MaxChannels> last_frame{};
     /// Number of buffers waiting to be played
     std::atomic<u32> queued_buffers{};
+    /// Playback starvation totals, reported outside the audio callback.
+    std::atomic<u64> underrun_frames{};
+    std::atomic<u64> short_reads{};
     /// The ring size for audio out buffers (usually 4, rarely 2 or 8)
     u32 max_queue_size{};
     /// Locks access to sample count tracking info
