@@ -4,9 +4,10 @@
 
 """Exercise production audio queue/callback logic without an Android device.
 
-The real sink methods and queue containers are compiled with small Core/SDL
-stand-ins. A test queue wrapper pauses the producer immediately after descriptor
-publication so a real consumer thread can exercise that scheduling boundary.
+The real sink methods, guest-memory adapter, device append method, and queue
+containers are compiled with small Core/SDL stand-ins. A test queue wrapper pauses
+the producer immediately after descriptor publication so a real consumer thread
+can exercise that scheduling boundary.
 This validates sample delivery, not Android driver timing or audible quality.
 """
 
@@ -44,10 +45,12 @@ PREFIX = r'''
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <semaphore>
 #include <span>
 #include <stdexcept>
@@ -56,10 +59,13 @@ PREFIX = r'''
 #include <type_traits>
 #include <vector>
 using u8 = uint8_t;
+using u16 = uint16_t;
 using u32 = uint32_t;
 using u64 = uint64_t;
+using VAddr = uint64_t;
 using s16 = int16_t;
 using s32 = int32_t;
+using s64 = int64_t;
 using f32 = float;
 namespace Core {
 struct TestTiming {
@@ -126,6 +132,30 @@ public:
 '''
 
 TESTS = r'''
+void GuestSamplesPreserved(u32 channels, f32 volume, const std::vector<s16>& original,
+                           const std::vector<s16>& expected) {
+    Core::System system;
+    auto sink = std::make_unique<SinkStream>(system, StreamType::Out);
+    sink->SetSystemChannels(channels);
+    sink->SetSystemVolume(volume);
+    TestProcess process;
+    process.memory.samples = original;
+    DeviceSession session{sink.get(), StreamType::Out, static_cast<u16>(channels), &process};
+    AudioBuffer buffer{};
+    buffer.size = original.size() * sizeof(s16);
+    buffer.tag = 1;
+    s16* scratch_storage = nullptr;
+    for (int repeat = 0; repeat < 2; ++repeat) {
+        session.AppendBuffers(std::span{&buffer, 1});
+        Check(process.memory.samples == original, "playback conversion modified guest samples");
+        if (repeat == 0) scratch_storage = session.tmp_samples.data();
+        Check(session.tmp_samples.data() == scratch_storage, "audio scratch storage was reallocated");
+        std::vector<s16> output(expected.size());
+        sink->ProcessAudioOutAndRender(output, expected.size() / 2);
+        Check(output == expected, "reusing a guest buffer changed its playback samples");
+    }
+}
+
 void Append(SinkStream& sink, std::vector<s16> samples, u32 channels = 2) {
     sink.SetSystemChannels(channels);
     SinkBuffer buffer{samples.size() / channels, 0, 1, false};
@@ -282,6 +312,13 @@ int main() {
         }
     };
     run("stereo handoff", [] { Handoff(2, {10, 20, 30, 40}, {10, 20, 30, 40}); });
+    run("surround guest buffer preservation and reuse", [] {
+        GuestSamplesPreserved(6, 1.0f, {100, 200, 0, 0, 0, 0, 300, 400, 0, 0, 0, 0},
+                              {100, 200, 300, 400});
+    });
+    run("stereo volume preserves guest buffer", [] {
+        GuestSamplesPreserved(2, 0.5f, {100, 200, 300, 400}, {50, 100, 150, 200});
+    });
     run("mono handoff", [] { Handoff(1, {10, 20}, {10, 0, 20, 0}); });
     run("surround downmix handoff", [] { Handoff(6, {100, 200, 0, 0, 0, 0}, {100, 200}); });
     run("partial-buffer underrun", Underrun);
@@ -293,6 +330,39 @@ int main() {
 #endif
     run("paused output and capture", PausedAndInput);
     return failures ? 1 : 0;
+}
+'''
+
+DEVICE_STUBS = r'''
+namespace Core::Memory {
+struct Memory {
+    static constexpr bool HAS_FLUSH_INVALIDATION = false;
+    std::vector<s16> samples;
+    u8* GetSpan(u64 address, size_t bytes) {
+        Check(address <= samples.size() * sizeof(s16) &&
+                  bytes <= samples.size() * sizeof(s16) - address, "guest read out of bounds");
+        return reinterpret_cast<u8*>(samples.data()) + address;
+    }
+    void ReadBlockUnsafe(u64 address, void* destination, size_t bytes) {
+        std::memcpy(destination, GetSpan(address, bytes), bytes);
+    }
+};
+template <typename T, GuestMemoryFlags FLAGS>
+using CpuGuestMemory = GuestMemory<Memory, T, FLAGS>;
+}
+struct TestProcess {
+    Core::Memory::Memory memory;
+    Core::Memory::Memory& GetMemory() { return memory; }
+};
+namespace AudioCore {
+struct DeviceSession {
+    Sink::SinkStream* stream;
+    Sink::StreamType type;
+    u16 channel_count;
+    TestProcess* handle;
+    Common::ScratchBuffer<s16> tmp_samples{};
+    void AppendBuffers(std::span<const AudioBuffer> buffers);
+};
 }
 '''
 
@@ -321,7 +391,15 @@ def main():
     source += without_includes(read('src/audio_core/sink/sink_stream.cpp'))
     source += SDL_STUBS
     source += function(read('src/audio_core/sink/sdl3_sink.cpp'), 'static void DataCallback')
-    source += '\n};\n' + TESTS
+    source += '\n};\n#define ASSERT(condition) Check(condition, "guest memory assertion")\n'
+    source += without_includes(read('src/common/scratch_buffer.h'))
+    source += without_includes(read('src/core/guest_memory.h'))
+    source += without_includes(read('src/audio_core/device/audio_buffer.h'))
+    source += DEVICE_STUBS
+    source += 'namespace AudioCore {\n'
+    source += function(read('src/audio_core/device/device_session.cpp'),
+                       'void DeviceSession::AppendBuffers')
+    source += '\n}\n' + TESTS
     with tempfile.TemporaryDirectory(prefix='eden-audio-test-') as tmp:
         tmp = Path(tmp)
         cpp, binary = tmp / 'audio.cpp', tmp / 'audio-test'

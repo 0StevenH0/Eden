@@ -270,3 +270,28 @@ logs cumulative `underrun frames` and `short reads`; no callback logging is adde
 Underruns can also occur during startup or slow emulation, so their totals alone
 do not establish the cause of a particular pop. A recording and the corresponding
 log help separate delivery starvation from other mixing or decoding problems.
+
+The `f9860e3` diagnostic session at 100% speed recorded 46,560 missing frames
+(970 ms at 48 kHz), including a 5 ms startup underrun, over 101 seconds of reports.
+The largest submission gap was 549,899 us. Recorded underruns had no pending
+buffers while callbacks continued. This establishes delivery starvation, but does
+not locate the upstream stall. Near-full-scale and large-step PCM counters are
+heuristics, not proof of malformed audio. The session's ending guest panic and
+native crash have not been linked to the audio dropouts.
+
+AudioOut now copies guest samples into its existing reusable scratch buffer before
+the sink performs in-place downmixing or gain changes. The old direct guest-memory
+span allowed those operations to overwrite the game's original samples. Two host
+regressions reproduce that overwrite and verify unchanged guest data, repeatable
+playback, and storage reuse with the correction; all eleven host checks pass with
+address/undefined-behavior sanitizers. This fixes a demonstrated memory ownership
+bug, not a confirmed cause of the observed starvation or waveform flags.
+
+For Unicorn Overlord, `AudioOut upstream` reports long gaps between append,
+manager, and released-buffer collection calls, separating time waiting for the
+manager mutex from time doing work. Each operation reports at most once per
+250 ms, only after a gap of 40 ms or a wait/work duration of 20 ms. These reports
+run on service/manager threads, not the playback callback. Compare their host
+timestamps with underrun events. Other titles do not take these extra timestamps.
+The 25 ms lead, output backend, gains, and CPU/GPU settings are unchanged; audible
+improvement and the cost of the extra copy/timestamps need phone validation.

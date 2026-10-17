@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+#include <chrono>
 #include <mutex>
 
 #include "audio_core/out/audio_out_system.h"
@@ -142,6 +144,10 @@ private:
     Kernel::KEvent* event;
     /// Main audio out system
     System system;
+    bool audio_diagnostics{};
+    // Accessed with parent_mutex held, separately for append, manager, and collection calls.
+    std::array<std::chrono::steady_clock::time_point, 3> audio_diag_last_call{};
+    std::array<std::chrono::steady_clock::time_point, 3> audio_diag_last_report{};
 };
 
 } // namespace AudioCore::AudioOut

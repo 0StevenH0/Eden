@@ -13,7 +13,6 @@
 #include "common/settings.h"
 #include "core/core.h"
 #include "core/core_timing.h"
-#include "core/guest_memory.h"
 #include "core/memory.h"
 
 #include "core/hle/kernel/k_process.h"
@@ -119,9 +118,9 @@ void DeviceSession::AppendBuffers(std::span<const AudioBuffer> buffers) {
         if (type == Sink::StreamType::In) {
             stream->AppendBuffer(new_buffer, tmp_samples);
         } else {
-            Core::Memory::CpuGuestMemory<s16, Core::Memory::GuestMemoryFlags::UnsafeRead> samples(
-                handle->GetMemory(), buffer.samples, buffer.size / sizeof(s16));
-            stream->AppendBuffer(new_buffer, samples);
+            // The sink mixes and scales in place; never give it writable guest memory.
+            handle->GetMemory().ReadBlockUnsafe(buffer.samples, tmp_samples.data(), buffer.size);
+            stream->AppendBuffer(new_buffer, tmp_samples);
         }
     }
 }
