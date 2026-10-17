@@ -74,6 +74,7 @@ void SinkStream::AppendBuffer(SinkBuffer& buffer, std::span<s16> samples) {
         samples_buffer.Push(samples);
     }
 
+    appended_frames.fetch_add(buffer.frames, std::memory_order_relaxed);
     // Publish the descriptor only after its samples and queue count are ready.
     ++queued_buffers;
     queue.EmplaceWait(buffer);
@@ -185,6 +186,7 @@ void SinkStream::ProcessAudioOutAndRender(std::span<s16> output_buffer, std::siz
         return;
     }
 
+    requested_frames.fetch_add(num_frames, std::memory_order_relaxed);
     while (frames_written < num_frames) {
         if (playing_buffer.consumed || playing_buffer.frames == 0) {
             std::unique_lock lk{release_mutex};
@@ -217,11 +219,13 @@ void SinkStream::ProcessAudioOutAndRender(std::span<s16> output_buffer, std::siz
         }
     }
 
+    delivered_frames.fetch_add(actual_frames_written, std::memory_order_relaxed);
     if (frames_written > 0) {
         std::memcpy(last_frame.data(), &output_buffer[(frames_written - 1) * frame_size],
                     frame_size_bytes);
     }
     if (frames_written < num_frames) {
+        underrun_callbacks.fetch_add(1, std::memory_order_relaxed);
         underrun_frames.fetch_add(num_frames - frames_written, std::memory_order_relaxed);
         for (size_t i = frames_written; i < num_frames; i++) {
             std::memcpy(&output_buffer[i * frame_size], last_frame.data(), frame_size_bytes);
@@ -242,17 +246,9 @@ u64 SinkStream::GetExpectedPlayedSampleCount() {
     auto time_delta{cur_time - last_sample_count_update_time};
     auto exp_played_sample_count{min_played_sample_count + (TargetSampleRate * time_delta) / std::chrono::seconds{1}};
 
-    // Experimental game-specific audio-buffer lead for Unicorn Overlord.
-    // https://github.com/eden-emulator/Issue-Reports/issues/573
-    // This changes the reported sample-count lead from 25ms to 125ms for this title,
-    // without affecting other games or audio input streams.
-    constexpr u64 UnicornOverlordProgramId = 0x010069401ADB8000ULL;
-    constexpr u64 DefaultLeadBuffers = 5;
-    constexpr u64 UnicornOverlordLeadBuffers = 25;
-    const bool use_unicorn_workaround = type == StreamType::Out &&
-                                        system.GetApplicationProcessProgramID() == UnicornOverlordProgramId;
-    const u64 lead_buffers = use_unicorn_workaround ? UnicornOverlordLeadBuffers : DefaultLeadBuffers;
-    return std::min<u64>(exp_played_sample_count, max_played_sample_count) + TargetSampleCount * lead_buffers;
+    // The 125ms Unicorn Overlord experiment did not eliminate audio underruns
+    // on Android. Restore the original 25ms lead until the cause is diagnosed.
+    return std::min<u64>(exp_played_sample_count, max_played_sample_count) + TargetSampleCount * 5;
 }
 
 void SinkStream::WaitFreeSpace(std::stop_token stop_token) {
