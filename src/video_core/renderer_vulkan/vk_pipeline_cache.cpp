@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <fstream>
 #include <iostream>
@@ -768,7 +769,23 @@ GraphicsPipeline* PipelineCache::CurrentGraphicsPipelineSlowPath() {
     const auto [pair, is_new]{graphics_cache.try_emplace(graphics_key)};
     auto& pipeline{pair->second};
     if (is_new) {
+#ifdef EDEN_POCOPHONE_X7_PRO
+        const auto build_start = std::chrono::steady_clock::now();
+#endif
         pipeline = CreateGraphicsPipeline();
+#ifdef EDEN_POCOPHONE_X7_PRO
+        const auto build_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                  std::chrono::steady_clock::now() - build_start)
+                                  .count();
+        if (build_us >= 20'000) {
+            const auto host_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                     build_start.time_since_epoch())
+                                     .count();
+            LOG_INFO(Render_Vulkan,
+                     "Graphics pipeline creation: hash={:016X} host_us={} build_us={} success={}",
+                     graphics_key.Hash(), host_us, build_us, pipeline != nullptr);
+        }
+#endif
     }
     if (!pipeline) {
         return nullptr;

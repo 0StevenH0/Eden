@@ -307,16 +307,19 @@ next investigation toward upstream scheduling; it does not prove that rendering
 causes the audio stalls. The exported crash trace belongs to the older `f9860e3`
 run, not a new crash in this session.
 
-The POCO build now adds three bounded diagnostic points: `Timing stall` identifies
+The POCO build now adds focused diagnostic points: `Timing stall` identifies
 late timer events, slow callbacks, and waits to reacquire the event-queue lock;
 `Frame timing gap` reports emulator system-frame gaps of at least 50 ms; and
 `Graphics pipeline wait` reports waits of at least 20 ms for an unfinished shader
-pipeline. Host timestamps allow correlation with audio events. Timer reports are
+pipeline. `Graphics pipeline creation` covers synchronous shader translation and
+setup on a runtime cache miss taking at least 20 ms, before that wait can begin.
+Host timestamps allow correlation with audio events. Timer reports are
 limited to four per second for each of slow work and late dispatch, and frame
 reports to four per second. Timer measurements add two clock reads per executed
 event; frame reports reuse the existing timestamp, and shader timing is taken
-only on the pipeline wait path. This build does not change scheduling, shader
-asynchrony, graphics accuracy, or buffering. Phone overhead and the source of the
-remaining stalls still need measurement. Startup and intentional pauses can
+only on runtime cache misses and the pipeline wait path. This build does not
+change scheduling, shader asynchrony, graphics accuracy, or buffering. Phone
+overhead and the source of the remaining stalls still need measurement. Startup
+and intentional pauses can
 produce gaps; late timer deadlines spanning a known pause are excluded.
 
