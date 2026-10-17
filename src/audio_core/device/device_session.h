@@ -151,6 +151,15 @@ private:
     std::shared_ptr<Core::Timing::EventType> thread_event;
     /// Is this session initialised?
     bool initialized{};
+    // Host-clock snapshots for low-frequency AudioOut production/consumption diagnostics.
+    std::chrono::steady_clock::time_point audio_diag_last_time{};
+    std::chrono::steady_clock::time_point audio_diag_next_time{};
+    u64 audio_diag_last_appended{};
+    u64 audio_diag_last_requested{};
+    u64 audio_diag_last_delivered{};
+    u64 audio_diag_last_underruns{};
+    u64 audio_diag_last_underrun_callbacks{};
+    u64 audio_diag_last_short_reads{};
     /// Temporary sample buffer
     Common::ScratchBuffer<s16> tmp_samples{};
 };
