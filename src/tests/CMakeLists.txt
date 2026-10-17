@@ -17,6 +17,7 @@ add_executable(tests
     common/undefined_fix.cpp
     common/unique_function.cpp
     core/core_timing.cpp
+    core/kernel_thread_local.cpp
     core/internal_network/network.cpp
     video_core/memory_tracker.cpp
     input_common/calibration_configuration_job.cpp
@@ -37,3 +38,4 @@ if (NOT MSVC)
         $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-unused-parameter>
         $<$<COMPILE_LANGUAGE:C,CXX>:-Wno-missing-field-initializers>)
 endif()
+

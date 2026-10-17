@@ -198,3 +198,35 @@ symbol file and the APK have the same native build ID. Keep this artifact for an
 APK used in extended testing: stripped release APKs alone cannot recover function
 names. These symbols support tombstones; source file/line information is not
 promised by this symbol level. The release APK remains optimized and non-debuggable.
+
+## Kernel TLS and migrating CPU fibers
+
+The October 17 native traces exposed a CPU-runtime hazard. In the matched
+`a9b74e3` release library, optimized SVC code retains a host thread-local-storage
+(TLS) pointer across a wait that can move the guest fiber to another host thread.
+An older trace faults on a TLS-relative load after a wait. The latest trace fails
+return-address authentication in `std::mutex::lock`; a connection between that
+failure and stale TLS has not been established.
+
+Kernel TLS now resolves through a non-inlined accessor with a compiler fence. This
+prevents the compiler from reusing a lookup across scheduling operations while
+preserving NCE, multicore execution, Cortex-A725 tuning, LTO, and the existing GPU
+settings. The compiler fence is not a hardware memory fence. The accessor adds a
+small call cost; its effect on game frame times has not been measured.
+
+A Linux host harness extracted the production TLS layout and accessor, replacing
+only the unused kernel-thread payload with a stand-in. With `-O3 -flto`, a fiber
+migrated between two OS threads returned stale host state with the original
+lookup and the correct state with the new accessor. The repository also includes
+`Kernel TLS follows a migrating guest fiber`, which checks host and physical-core
+IDs using the real kernel and fiber APIs. The full test executable and Android
+release have not been built in this environment; the host harness is not proof
+that either native crash is resolved on the phone.
+
+Build `assemblePocoX7ProRelease`, retain the matching debug artifact, and repeat
+the same failing scene with NCE and the existing game settings. Compare sustained
+frame times and time to failure against the previous release at the same
+resolution and similar phone temperature, testing cold and warm caches
+separately. Export a new diagnostic ZIP after any crash. If return-address
+authentication still fails, investigate that trace independently instead of
+disabling authentication or broad CPU optimizations.

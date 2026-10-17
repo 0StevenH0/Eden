@@ -66,22 +66,21 @@ struct KernelCore::Impl {
     static constexpr size_t SystemMemoryBlockSlabHeapSize = 10000;
     static constexpr size_t BlockInfoSlabHeapSize = 4000;
     static constexpr size_t ReservedDynamicPageCount = 64;
-    // Be very careful when handling TLS data
-    // We do not want to concern ourselves with the appropriate way to manage them
-    // across **all** threads, we just need these for a few spare threads (+host/guest threads)
-    //
-    // Do not just read straight from here, use a reference beforehand, the cost of reading
-    // from TLS is greater than the cost of reading normal variables.
-    // But account that this Impl() is instanced once per program, and shared across threads
-    // so we can't use a reference for now.
-    //
-    // And we have the guarantee that the data won't move out of the way so we can safely
-    // take a reference to it. This isn't always universally true but this is "global" data
-    // so it will be statically given a TLS slot anyways.
-    static inline thread_local ThreadLocalData tls_data = {};
+    // Guest fibers can resume on another host thread. Resolve TLS in a separate call,
+    // and keep LTO from reusing that call's result across a scheduling operation.
+#ifdef _MSC_VER
+    __declspec(noinline)
+#else
+    [[gnu::noinline]]
+#endif
+    static ThreadLocalData& GetThreadLocalData() {
+        std::atomic_signal_fence(std::memory_order_seq_cst);
+        static thread_local ThreadLocalData data{};
+        return data;
+    }
 
     explicit Impl(Core::System& system_, KernelCore& kernel_) : system{system_} {
-        tls_data.lock = true;
+        GetThreadLocalData().lock = true;
     }
 
     void SetMulticore(bool is_multi) {
@@ -366,6 +365,7 @@ struct KernelCore::Impl {
 
     /// Sets the host thread ID for the caller.
     u32 SetHostThreadId(std::size_t core_id) {
+        auto& tls_data = GetThreadLocalData();
         // This should only be called during core init.
         ASSERT(tls_data.host_thread_id == UINT8_MAX);
 
@@ -377,7 +377,7 @@ struct KernelCore::Impl {
 
     /// Gets the host thread ID for the caller
     u32 GetHostThreadId() const {
-        return tls_data.host_thread_id;
+        return GetThreadLocalData().host_thread_id;
     }
 
     // Gets the dummy KThread for the caller, allocating a new one if this is the first time
@@ -404,7 +404,7 @@ struct KernelCore::Impl {
 
     /// Registers a new host thread by allocating a host thread ID for it
     void RegisterHostThread(KThread* existing_thread) {
-        (void)GetHostDummyThread(tls_data, existing_thread);
+        (void)GetHostDummyThread(GetThreadLocalData(), existing_thread);
     }
 
     [[nodiscard]] u32 GetCurrentHostThreadID() {
@@ -416,11 +416,11 @@ struct KernelCore::Impl {
 
     // Forces singlecore
     bool IsPhantomModeForSingleCore() const {
-        return tls_data.is_phantom_mode_for_singlecore;
+        return GetThreadLocalData().is_phantom_mode_for_singlecore;
     }
     void SetIsPhantomModeForSingleCore(bool value) {
         ASSERT(!is_multicore);
-        tls_data.is_phantom_mode_for_singlecore = value;
+        GetThreadLocalData().is_phantom_mode_for_singlecore = value;
     }
 
     bool IsShuttingDown() const {
@@ -432,7 +432,7 @@ struct KernelCore::Impl {
     }
 
     void SetCurrentEmuThread(KThread* thread) {
-        tls_data.current_thread = thread;
+        GetThreadLocalData().current_thread = thread;
     }
 
     void DeriveInitialMemoryLayout() {
@@ -1142,7 +1142,7 @@ u32 KernelCore::GetCurrentHostThreadID() const {
 }
 
 KThread* KernelCore::GetCurrentEmuThread() const {
-    return impl->GetCurrentEmuThread(Impl::tls_data);
+    return impl->GetCurrentEmuThread(Impl::GetThreadLocalData());
 }
 
 void KernelCore::SetCurrentEmuThread(KThread* thread) {
@@ -1404,3 +1404,4 @@ template KSlabHeap<KEventInfo>& KernelCore::SlabHeap();
 template KSlabHeap<KDebug>& KernelCore::SlabHeap();
 
 } // namespace Kernel
+
