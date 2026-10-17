@@ -242,8 +242,17 @@ u64 SinkStream::GetExpectedPlayedSampleCount() {
     auto time_delta{cur_time - last_sample_count_update_time};
     auto exp_played_sample_count{min_played_sample_count + (TargetSampleRate * time_delta) / std::chrono::seconds{1}};
 
-    // Add 25ms of latency in sample reporting to allow for some leeway in scheduler timings
-    return std::min<u64>(exp_played_sample_count, max_played_sample_count) + TargetSampleCount * 5;
+    // Experimental game-specific audio-buffer lead for Unicorn Overlord.
+    // https://github.com/eden-emulator/Issue-Reports/issues/573
+    // This changes the reported sample-count lead from 25ms to 125ms for this title,
+    // without affecting other games or audio input streams.
+    constexpr u64 UnicornOverlordProgramId = 0x010069401ADB8000ULL;
+    constexpr u64 DefaultLeadBuffers = 5;
+    constexpr u64 UnicornOverlordLeadBuffers = 25;
+    const bool use_unicorn_workaround = type == StreamType::Out &&
+                                        system.GetApplicationProcessProgramID() == UnicornOverlordProgramId;
+    const u64 lead_buffers = use_unicorn_workaround ? UnicornOverlordLeadBuffers : DefaultLeadBuffers;
+    return std::min<u64>(exp_played_sample_count, max_played_sample_count) + TargetSampleCount * lead_buffers;
 }
 
 void SinkStream::WaitFreeSpace(std::stop_token stop_token) {
