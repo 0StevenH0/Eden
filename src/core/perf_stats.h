@@ -82,6 +82,9 @@ private:
     Clock::duration previous_frame_length = Clock::duration::zero();
     /// Previously computed fps
     double previous_fps = 0;
+#ifdef EDEN_POCOPHONE_X7_PRO
+    Clock::time_point last_gap_report{};
+#endif
 };
 
 class SpeedLimiter {

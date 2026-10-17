@@ -15,6 +15,7 @@
 #include "common/windows/timer_resolution.h"
 #endif
 
+#include "common/logging.h"
 #include "common/settings.h"
 #include "core/core_timing.h"
 #include "core/hardware_properties.h"
@@ -70,6 +71,10 @@ void CoreTiming::Initialize(std::function<void()>&& on_thread_init_) {
     on_thread_init = std::move(on_thread_init_);
     event_fifo_id = 0;
     cpu_ticks = 0;
+#ifdef EDEN_POCOPHONE_X7_PRO
+    last_slow_callback_report_ns = 0;
+    last_late_dispatch_report_ns = 0;
+#endif
     if (is_multicore) {
         timer_thread = std::jthread([this](std::stop_token stop_token) {
             Common::SetCurrentThreadName("HostTiming");
@@ -259,17 +264,32 @@ std::optional<s64> CoreTiming::Advance() {
 
                 basic_lock.unlock();
 
-                event_type->callback(
-                    evt_time, std::chrono::nanoseconds{GetGlobalTimeNs().count() - evt_time});
+                const auto callback_start = GetGlobalTimeNs().count();
+                event_type->callback(evt_time, std::chrono::nanoseconds{callback_start - evt_time});
+#ifdef EDEN_POCOPHONE_X7_PRO
+                const auto callback_end = GetGlobalTimeNs().count();
+#endif
 
                 basic_lock.lock();
+#ifdef EDEN_POCOPHONE_X7_PRO
+                ReportTimingStall(*event_type, evt_time, callback_start, callback_end,
+                                  GetGlobalTimeNs().count());
+#endif
             } else {
                 basic_lock.unlock();
 
+                const auto callback_start = GetGlobalTimeNs().count();
                 const auto new_schedule_time{event_type->callback(
-                    evt_time, std::chrono::nanoseconds{GetGlobalTimeNs().count() - evt_time})};
+                    evt_time, std::chrono::nanoseconds{callback_start - evt_time})};
+#ifdef EDEN_POCOPHONE_X7_PRO
+                const auto callback_end = GetGlobalTimeNs().count();
+#endif
 
                 basic_lock.lock();
+#ifdef EDEN_POCOPHONE_X7_PRO
+                ReportTimingStall(*event_type, evt_time, callback_start, callback_end,
+                                  GetGlobalTimeNs().count());
+#endif
 
                 if (evt_sequence_num != event_type->sequence_number) {
                     // Heap handle is invalidated after external modification.
@@ -301,6 +321,33 @@ std::optional<s64> CoreTiming::Advance() {
         return std::nullopt;
     }
 }
+
+#ifdef EDEN_POCOPHONE_X7_PRO
+void CoreTiming::ReportTimingStall(const EventType& type, s64 deadline_ns, s64 started_ns,
+                                 s64 finished_ns, s64 relocked_ns) {
+    const s64 callback_us = (finished_ns - started_ns) / 1000;
+    const s64 relock_us = (relocked_ns - finished_ns) / 1000;
+    // Resuming a paused event queue naturally leaves old deadlines behind.
+    const s64 late_us = deadline_ns < pause_end_time
+                           ? 0
+                           : (std::max<s64>)(0, (started_ns - deadline_ns) / 1000);
+    const bool slow_work = callback_us >= 20'000 || relock_us >= 20'000;
+    if (!slow_work && late_us < 40'000) {
+        return;
+    }
+    auto& last_report = slow_work ? last_slow_callback_report_ns : last_late_dispatch_report_ns;
+    if (last_report != 0 && relocked_ns - last_report < 250'000'000) {
+        return;
+    }
+    last_report = relocked_ns;
+    const auto host_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                             std::chrono::steady_clock::now().time_since_epoch())
+                             .count();
+    LOG_INFO(Core,
+             "Timing stall: event={} host_us={} late_us={} callback_us={} relock_us={} paused={}",
+             type.name, host_us, late_us, callback_us, relock_us, paused.load());
+}
+#endif
 
 void CoreTiming::Reset() {
     paused = true;

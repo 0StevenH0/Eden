@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <iostream>
 #include <span>
@@ -599,8 +600,26 @@ bool GraphicsPipeline::ConfigureDraw(const RescalingPushConstant& rescaling,
     if (!is_built.load(std::memory_order::relaxed)) {
         // Wait for the pipeline to be built
         scheduler.Record([this](vk::CommandBuffer) {
+#ifdef EDEN_POCOPHONE_X7_PRO
+            const auto wait_start = std::chrono::steady_clock::now();
+#endif
             std::unique_lock lock{build_mutex};
             build_condvar.wait(lock, [this] { return is_built.load(std::memory_order::relaxed); });
+#ifdef EDEN_POCOPHONE_X7_PRO
+            const auto wait_end = std::chrono::steady_clock::now();
+            const auto wait_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                     wait_end - wait_start)
+                                     .count();
+            if (wait_us >= 20'000) {
+                const auto host_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                         wait_start.time_since_epoch())
+                                         .count();
+                lock.unlock();
+                LOG_INFO(Render_Vulkan,
+                         "Graphics pipeline wait: hash={:016X} host_us={} wait_us={}",
+                         key.Hash(), host_us, wait_us);
+            }
+#endif
         });
     }
     const bool is_rescaling{texture_cache.IsRescaling()};

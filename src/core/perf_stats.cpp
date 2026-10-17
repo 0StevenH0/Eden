@@ -16,6 +16,7 @@
 #include "common/fs/file.h"
 #include "common/fs/fs.h"
 #include "common/fs/path_util.h"
+#include "common/logging.h"
 #include "common/settings.h"
 #include "core/perf_stats.h"
 
@@ -68,7 +69,7 @@ void PerfStats::BeginSystemFrame() {
 }
 
 void PerfStats::EndSystemFrame() {
-    std::scoped_lock lock{object_mutex};
+    std::unique_lock lock{object_mutex};
 
     auto frame_end = Clock::now();
     const auto frame_time = frame_end - frame_begin;
@@ -81,6 +82,18 @@ void PerfStats::EndSystemFrame() {
 
     previous_frame_length = frame_end - previous_frame_end;
     previous_frame_end = frame_end;
+#ifdef EDEN_POCOPHONE_X7_PRO
+    if (title_id != 0 && current_index > IgnoreFrames && previous_frame_length >= 50ms &&
+        (last_gap_report == Clock::time_point{} || frame_end - last_gap_report >= 250ms)) {
+        last_gap_report = frame_end;
+        const auto gap_us = duration_cast<microseconds>(previous_frame_length).count();
+        const auto work_us = duration_cast<microseconds>(frame_time).count();
+        const auto host_us = duration_cast<microseconds>(frame_end.time_since_epoch()).count();
+        lock.unlock();
+        LOG_INFO(Core, "Frame timing gap: title={:016X} host_us={} gap_us={} work_us={}",
+                 title_id, host_us, gap_us, work_us);
+    }
+#endif
 }
 
 void PerfStats::EndGameFrame() {

@@ -164,6 +164,14 @@ public:
     std::atomic<bool> wait_set{};
     std::atomic<bool> has_started{};
     bool is_multicore{};
+
+#ifdef EDEN_POCOPHONE_X7_PRO
+private:
+    void ReportTimingStall(const EventType& type, s64 deadline_ns, s64 started_ns,
+                           s64 finished_ns, s64 relocked_ns);
+    s64 last_slow_callback_report_ns{};
+    s64 last_late_dispatch_report_ns{};
+#endif
 };
 
 /// Creates a core timing event with the given name and callback.
