@@ -9,6 +9,7 @@
 #include "audio_core/device/audio_buffer.h"
 #include "audio_core/device/device_session.h"
 #include "audio_core/sink/sink_stream.h"
+#include "common/logging.h"
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/guest_memory.h"
@@ -70,6 +71,16 @@ void DeviceSession::Finalize() {
 
 void DeviceSession::Start() {
     if (stream) {
+        if (type == Sink::StreamType::Out) {
+            audio_diag_last_time = std::chrono::steady_clock::now();
+            audio_diag_next_time = audio_diag_last_time + std::chrono::seconds(1);
+            audio_diag_last_appended = stream->GetAppendedFrames();
+            audio_diag_last_requested = stream->GetRequestedFrames();
+            audio_diag_last_delivered = stream->GetDeliveredFrames();
+            audio_diag_last_underruns = stream->GetUnderrunFrames();
+            audio_diag_last_underrun_callbacks = stream->GetUnderrunCallbackCount();
+            audio_diag_last_short_reads = stream->GetShortReadCount();
+        }
         stream->Start();
         system.CoreTiming().ScheduleLoopingEvent(std::chrono::nanoseconds::zero(), INCREMENT_TIME,
                                                  thread_event);
@@ -133,6 +144,34 @@ u64 DeviceSession::GetPlayedSampleCount() const {
 std::optional<std::chrono::nanoseconds> DeviceSession::ThreadFunc() {
     played_sample_count = stream->GetExpectedPlayedSampleCount();
     if (type == Sink::StreamType::Out) {
+        // Host-second snapshots, taken off the real-time audio callback.
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= audio_diag_next_time) {
+            const auto interval_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - audio_diag_last_time).count();
+            const u64 appended = stream->GetAppendedFrames();
+            const u64 requested = stream->GetRequestedFrames();
+            const u64 delivered = stream->GetDeliveredFrames();
+            const u64 underruns = stream->GetUnderrunFrames();
+            const u64 underrun_callbacks = stream->GetUnderrunCallbackCount();
+            const u64 short_reads = stream->GetShortReadCount();
+            LOG_INFO(Audio_Sink,
+                     "AudioOut rates: interval_ms={} appended={} requested={} delivered={} underrun_frames={} underrun_callbacks={} short_reads={} queued_buffers={}",
+                     interval_ms, appended - audio_diag_last_appended,
+                     requested - audio_diag_last_requested,
+                     delivered - audio_diag_last_delivered,
+                     underruns - audio_diag_last_underruns,
+                     underrun_callbacks - audio_diag_last_underrun_callbacks,
+                     short_reads - audio_diag_last_short_reads, stream->GetQueueSize());
+            audio_diag_last_time = now;
+            audio_diag_next_time = now + std::chrono::seconds(1);
+            audio_diag_last_appended = appended;
+            audio_diag_last_requested = requested;
+            audio_diag_last_delivered = delivered;
+            audio_diag_last_underruns = underruns;
+            audio_diag_last_underrun_callbacks = underrun_callbacks;
+            audio_diag_last_short_reads = short_reads;
+        }
         system.AudioCore().GetAudioManager().SetEvent(Event::Type::AudioOutManager, true);
     } else {
         system.AudioCore().GetAudioManager().SetEvent(Event::Type::AudioInManager, true);
