@@ -160,6 +160,11 @@ private:
     u64 audio_diag_last_underruns{};
     u64 audio_diag_last_underrun_callbacks{};
     u64 audio_diag_last_short_reads{};
+    u64 audio_diag_last_append_gaps{};
+    u64 audio_diag_last_callback_gaps{};
+    u64 audio_diag_last_clipped_samples{};
+    u64 audio_diag_last_large_steps{};
+    u64 audio_diag_event_cursor{};
     /// Temporary sample buffer
     Common::ScratchBuffer<s16> tmp_samples{};
 };

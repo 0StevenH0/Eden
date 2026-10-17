@@ -58,6 +58,15 @@ struct SinkBuffer {
  */
 class SinkStream {
 public:
+    // Diagnostic snapshots are copied off the real-time callback thread.
+    struct UnderrunTrace {
+        u64 sequence{};
+        u64 host_us{};
+        u64 missing_frames{};
+        u64 callback_gap_us{};
+        u64 producer_age_us{};
+        u64 pending_buffers{};
+    };
     explicit SinkStream(Core::System& system_, StreamType type_) : system{system_}, type{type_} {}
     virtual ~SinkStream() {}
 
@@ -180,6 +189,29 @@ public:
     u64 GetUnderrunCallbackCount() const {
         return underrun_callbacks.load(std::memory_order_relaxed);
     }
+    u64 GetPeakAppendGapUs() const {
+        return peak_append_gap_us.load(std::memory_order_relaxed);
+    }
+    u64 GetPeakCallbackGapUs() const {
+        return peak_callback_gap_us.load(std::memory_order_relaxed);
+    }
+    u64 GetAppendGapsOver40Ms() const {
+        return append_gaps_over_40ms.load(std::memory_order_relaxed);
+    }
+    u64 GetCallbackGapsOver40Ms() const {
+        return callback_gaps_over_40ms.load(std::memory_order_relaxed);
+    }
+    u64 GetClippedSamples() const {
+        return clipped_samples.load(std::memory_order_relaxed);
+    }
+    u64 GetLargePcmSteps() const {
+        return large_pcm_steps.load(std::memory_order_relaxed);
+    }
+    u64 GetUnderrunSequence() const {
+        return underrun_sequence.load(std::memory_order_acquire);
+    }
+    // Keeps the latest 12 events per report; skips earlier events on large bursts.
+    std::vector<UnderrunTrace> DrainUnderrunTraces(u64& cursor) const;
 
     /**
      * Set the maximum buffer queue size.
@@ -276,6 +308,31 @@ private:
     std::atomic<u64> requested_frames{};
     std::atomic<u64> delivered_frames{};
     std::atomic<u64> underrun_callbacks{};
+    std::atomic<u64> last_append_us{};
+    std::atomic<u64> last_callback_us{};
+    std::atomic<u64> peak_append_gap_us{};
+    std::atomic<u64> peak_callback_gap_us{};
+    std::atomic<u64> append_gaps_over_40ms{};
+    std::atomic<u64> callback_gaps_over_40ms{};
+    std::atomic<u64> clipped_samples{};
+    std::atomic<u64> large_pcm_steps{};
+    std::array<s16, MaxChannels> pcm_last_real_frame{};
+    bool has_pcm_last_real_frame{false};
+
+    // Fixed-size event history. Atomic fields let the reporting thread read
+    // without locks or data races while audio callbacks are running.
+    static constexpr std::size_t TraceCapacity = 128;
+    struct UnderrunTraceSlot {
+        std::atomic<u64> sequence{};
+        std::atomic<u64> host_us{};
+        std::atomic<u64> missing_frames{};
+        std::atomic<u64> callback_gap_us{};
+        std::atomic<u64> producer_age_us{};
+        std::atomic<u64> pending_buffers{};
+    };
+    std::array<UnderrunTraceSlot, TraceCapacity> underrun_trace{};
+    std::atomic<u64> underrun_sequence{};
+
     /// The ring size for audio out buffers (usually 4, rarely 2 or 8)
     u32 max_queue_size{};
     /// Locks access to sample count tracking info

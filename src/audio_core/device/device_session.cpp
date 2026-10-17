@@ -10,6 +10,7 @@
 #include "audio_core/device/device_session.h"
 #include "audio_core/sink/sink_stream.h"
 #include "common/logging.h"
+#include "common/settings.h"
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/guest_memory.h"
@@ -80,6 +81,11 @@ void DeviceSession::Start() {
             audio_diag_last_underruns = stream->GetUnderrunFrames();
             audio_diag_last_underrun_callbacks = stream->GetUnderrunCallbackCount();
             audio_diag_last_short_reads = stream->GetShortReadCount();
+            audio_diag_last_append_gaps = stream->GetAppendGapsOver40Ms();
+            audio_diag_last_callback_gaps = stream->GetCallbackGapsOver40Ms();
+            audio_diag_last_clipped_samples = stream->GetClippedSamples();
+            audio_diag_last_large_steps = stream->GetLargePcmSteps();
+            audio_diag_event_cursor = stream->GetUnderrunSequence();
         }
         stream->Start();
         system.CoreTiming().ScheduleLoopingEvent(std::chrono::nanoseconds::zero(), INCREMENT_TIME,
@@ -171,6 +177,33 @@ std::optional<std::chrono::nanoseconds> DeviceSession::ThreadFunc() {
             audio_diag_last_underruns = underruns;
             audio_diag_last_underrun_callbacks = underrun_callbacks;
             audio_diag_last_short_reads = short_reads;
+
+            const auto append_gaps = stream->GetAppendGapsOver40Ms();
+            const auto callback_gaps = stream->GetCallbackGapsOver40Ms();
+            const auto clips = stream->GetClippedSamples();
+            const auto steps = stream->GetLargePcmSteps();
+            const u64 newest_underrun = stream->GetUnderrunSequence();
+            const u64 event_count = newest_underrun >= audio_diag_event_cursor
+                                      ? newest_underrun - audio_diag_event_cursor : 0;
+            const auto events = stream->DrainUnderrunTraces(audio_diag_event_cursor);
+            LOG_INFO(Audio_Sink,
+                     "AudioOut detail: speed_limit_pct={} peak_append_gap_us={} peak_callback_gap_us={} append_gaps_over_40ms={} callback_gaps_over_40ms={} clipped_samples={} large_pcm_steps={} underrun_events={} reported_events={}",
+                     Settings::SpeedLimit(), stream->GetPeakAppendGapUs(),
+                     stream->GetPeakCallbackGapUs(),
+                     append_gaps - audio_diag_last_append_gaps,
+                     callback_gaps - audio_diag_last_callback_gaps,
+                     clips - audio_diag_last_clipped_samples,
+                     steps - audio_diag_last_large_steps, event_count, events.size());
+            for (const auto& event : events) {
+                LOG_INFO(Audio_Sink,
+                         "AudioOut underrun event: seq={} host_us={} missing_frames={} callback_gap_us={} producer_age_us={} pending_buffers={}",
+                         event.sequence, event.host_us, event.missing_frames,
+                         event.callback_gap_us, event.producer_age_us, event.pending_buffers);
+            }
+            audio_diag_last_append_gaps = append_gaps;
+            audio_diag_last_callback_gaps = callback_gaps;
+            audio_diag_last_clipped_samples = clips;
+            audio_diag_last_large_steps = steps;
         }
         system.AudioCore().GetAudioManager().SetEvent(Event::Type::AudioOutManager, true);
     } else {

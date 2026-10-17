@@ -22,6 +22,45 @@
 
 namespace AudioCore::Sink {
 
+namespace {
+u64 HostMicroseconds() {
+    return static_cast<u64>(std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+void RecordPeak(std::atomic<u64>& peak, u64 value) {
+    auto prior = peak.load(std::memory_order_relaxed);
+    while (value > prior &&
+           !peak.compare_exchange_weak(prior, value, std::memory_order_relaxed)) {}
+}
+} // namespace
+
+std::vector<SinkStream::UnderrunTrace> SinkStream::DrainUnderrunTraces(u64& cursor) const {
+    const u64 end = underrun_sequence.load(std::memory_order_acquire);
+    if (end <= cursor) {
+        return {};
+    }
+    constexpr u64 MaxPerReport = 12;
+    const u64 first = (std::max)(cursor + 1, end >= MaxPerReport ? end - MaxPerReport + 1 : 1);
+    std::vector<UnderrunTrace> events;
+    events.reserve(static_cast<std::size_t>(end - first + 1));
+    for (u64 seq = first; seq <= end; ++seq) {
+        const auto& slot = underrun_trace[(seq - 1) % TraceCapacity];
+        if (slot.sequence.load(std::memory_order_acquire) != seq) {
+            continue;
+        }
+        UnderrunTrace event{seq, slot.host_us.load(std::memory_order_relaxed),
+                            slot.missing_frames.load(std::memory_order_relaxed),
+                            slot.callback_gap_us.load(std::memory_order_relaxed),
+                            slot.producer_age_us.load(std::memory_order_relaxed),
+                            slot.pending_buffers.load(std::memory_order_relaxed)};
+        if (slot.sequence.load(std::memory_order_acquire) == seq) {
+            events.push_back(event);
+        }
+    }
+    cursor = end;
+    return events;
+}
+
 void SinkStream::AppendBuffer(SinkBuffer& buffer, std::span<s16> samples) {
     if (type == StreamType::In)
         return;
@@ -78,6 +117,15 @@ void SinkStream::AppendBuffer(SinkBuffer& buffer, std::span<s16> samples) {
     // Publish the descriptor only after its samples and queue count are ready.
     ++queued_buffers;
     queue.EmplaceWait(buffer);
+    const u64 now_us = HostMicroseconds();
+    const u64 previous_us = last_append_us.exchange(now_us, std::memory_order_relaxed);
+    if (previous_us != 0 && now_us >= previous_us) {
+        const u64 gap = now_us - previous_us;
+        RecordPeak(peak_append_gap_us, gap);
+        if (gap >= 40'000) {
+            append_gaps_over_40ms.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
 }
 
 std::vector<s16> SinkStream::ReleaseBuffer(u64 num_samples) {
@@ -186,6 +234,16 @@ void SinkStream::ProcessAudioOutAndRender(std::span<s16> output_buffer, std::siz
         return;
     }
 
+    const u64 callback_us = HostMicroseconds();
+    const u64 previous_callback_us = last_callback_us.exchange(callback_us, std::memory_order_relaxed);
+    const u64 callback_gap_us = previous_callback_us != 0 && callback_us >= previous_callback_us
+                                    ? callback_us - previous_callback_us : 0;
+    if (callback_gap_us != 0) {
+        RecordPeak(peak_callback_gap_us, callback_gap_us);
+        if (callback_gap_us >= 40'000) {
+            callback_gaps_over_40ms.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     requested_frames.fetch_add(num_frames, std::memory_order_relaxed);
     while (frames_written < num_frames) {
         if (playing_buffer.consumed || playing_buffer.frames == 0) {
@@ -220,6 +278,35 @@ void SinkStream::ProcessAudioOutAndRender(std::span<s16> output_buffer, std::siz
     }
 
     delivered_frames.fetch_add(actual_frames_written, std::memory_order_relaxed);
+
+    // PCM integrity counters are diagnostic-only for Unicorn Overlord.
+    // Scan samples already delivered, excluding synthesized underrun padding.
+    if (type == StreamType::Out &&
+        system.GetApplicationProcessProgramID() == 0x010069401ADB8000ULL) {
+        u64 clipped = 0;
+        u64 large_steps = 0;
+        for (std::size_t frame = 0; frame < actual_frames_written; ++frame) {
+            for (std::size_t channel = 0; channel < num_channels; ++channel) {
+                const s32 sample = output_buffer[frame * frame_size + channel];
+                const s32 previous = pcm_last_real_frame[channel];
+                if (sample >= 32760 || sample <= -32760) {
+                    ++clipped;
+                }
+                if (has_pcm_last_real_frame &&
+                    (sample > previous ? sample - previous : previous - sample) > 26000) {
+                    ++large_steps;
+                }
+                pcm_last_real_frame[channel] = static_cast<s16>(sample);
+            }
+            has_pcm_last_real_frame = true;
+        }
+        if (clipped > 0) {
+            clipped_samples.fetch_add(clipped, std::memory_order_relaxed);
+        }
+        if (large_steps > 0) {
+            large_pcm_steps.fetch_add(large_steps, std::memory_order_relaxed);
+        }
+    }
     if (frames_written > 0) {
         std::memcpy(last_frame.data(), &output_buffer[(frames_written - 1) * frame_size],
                     frame_size_bytes);
@@ -227,6 +314,19 @@ void SinkStream::ProcessAudioOutAndRender(std::span<s16> output_buffer, std::siz
     if (frames_written < num_frames) {
         underrun_callbacks.fetch_add(1, std::memory_order_relaxed);
         underrun_frames.fetch_add(num_frames - frames_written, std::memory_order_relaxed);
+        const u64 producer_us = last_append_us.load(std::memory_order_relaxed);
+        const u64 producer_age_us = producer_us != 0 && callback_us >= producer_us
+                                        ? callback_us - producer_us : 0;
+        const u64 seq = underrun_sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+        auto& slot = underrun_trace[(seq - 1) % TraceCapacity];
+        slot.sequence.store(0, std::memory_order_release);
+        slot.host_us.store(callback_us, std::memory_order_relaxed);
+        slot.missing_frames.store(num_frames - frames_written, std::memory_order_relaxed);
+        slot.callback_gap_us.store(callback_gap_us, std::memory_order_relaxed);
+        slot.producer_age_us.store(producer_age_us, std::memory_order_relaxed);
+        slot.pending_buffers.store(queued_buffers.load(std::memory_order_relaxed),
+                                   std::memory_order_relaxed);
+        slot.sequence.store(seq, std::memory_order_release);
         for (size_t i = frames_written; i < num_frames; i++) {
             std::memcpy(&output_buffer[i * frame_size], last_frame.data(), frame_size_bytes);
         }

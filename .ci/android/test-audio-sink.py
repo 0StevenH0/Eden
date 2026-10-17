@@ -209,6 +209,13 @@ void AudioTelemetryAndDefaultLead() {
           "requested/delivered telemetry incorrect");
     Check(sink.GetUnderrunFrames() == 2 && sink.GetUnderrunCallbackCount() == 1,
           "underrun diagnostics incorrect");
+    u64 cursor = 0;
+    auto events = sink.DrainUnderrunTraces(cursor);
+    Check(events.size() == 1 && events[0].missing_frames == 2 &&
+              cursor == 1 && events[0].pending_buffers == 0,
+          "per-callback trace incorrectly captured");
+    Check(sink.DrainUnderrunTraces(cursor).empty(),
+          "draining trace twice must not duplicate events");
 }
 
 void NoAdditionalData() {
