@@ -153,6 +153,10 @@ public:
         if (cubeb_stream_stop(stream_backend) != CUBEB_OK) {
             LOG_CRITICAL(Audio_Sink, "Error stopping cubeb stream");
         }
+        if (type != StreamType::In) {
+            LOG_INFO(Audio_Sink, "Cubeb stream {} stopped: underrun frames {}, short reads {}",
+                     name, GetUnderrunFrames(), GetShortReadCount());
+        }
     }
 
 private:
