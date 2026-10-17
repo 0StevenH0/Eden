@@ -6,6 +6,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include <bit>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 
@@ -146,12 +147,42 @@ NvResult nvhost_ctrl::IocCtrlEventWait(IocCtrlEventWaitParams& params, bool is_a
     must_unmark_fail = false;
 
     const auto check_failing = [&]() {
-        if (events[slot].fails > 2) {
+        auto& event = events[slot];
+        // An asynchronous completion breaks the failure streak just like a ready fence.
+        if (event.status.load(std::memory_order_acquire) == EventState::Signalled) {
+            event.fails = 0;
+        }
+        if (event.fails > 2) {
+#ifdef EDEN_POCOPHONE_X7_PRO
+            using Clock = std::chrono::steady_clock;
+            const auto started = Clock::now();
+            Clock::time_point wait_started, wait_finished;
+#endif
             {
                 auto lk = system.StallApplication();
+#ifdef EDEN_POCOPHONE_X7_PRO
+                wait_started = Clock::now();
+#endif
                 host1x_syncpoint_manager.WaitHost(fence_id, target_value);
+#ifdef EDEN_POCOPHONE_X7_PRO
+                wait_finished = Clock::now();
+#endif
                 system.UnstallApplication();
             }
+#ifdef EDEN_POCOPHONE_X7_PRO
+            const auto micros = [](auto duration) {
+                return std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+            };
+            const auto total_us = micros(Clock::now() - started);
+            if (total_us >= 20'000) {
+                LOG_INFO(Service_NVDRV,
+                         "NV syncpoint fallback: host_us={} syncpt_id={} target={} failures={} "
+                         "pause_us={} wait_us={} total_us={}",
+                         micros(started.time_since_epoch()), fence_id, target_value, event.fails,
+                         micros(wait_started - started), micros(wait_finished - wait_started),
+                         total_us);
+            }
+#endif
             params.value.raw = target_value;
             return true;
         }
@@ -283,14 +314,17 @@ NvResult nvhost_ctrl::IocCtrlClearEventWait(IocCtrlEventClearParams& params) {
     auto lock = NvEventsLock();
 
     auto& event = events[event_id];
-    if (event.status.exchange(EventState::Cancelling, std::memory_order_acq_rel) ==
-        EventState::Waiting) {
+    const auto previous_status =
+        event.status.exchange(EventState::Cancelling, std::memory_order_acq_rel);
+    if (previous_status == EventState::Waiting) {
         auto& host1x_syncpoint_manager = system.Host1x().GetSyncpointManager();
         host1x_syncpoint_manager.DeregisterHostAction(event.assigned_syncpt, event.wait_handle);
         syncpoint_manager.UpdateMin(event.assigned_syncpt);
         event.wait_handle = {};
+        ++event.fails;
+    } else {
+        event.fails = 0;
     }
-    event.fails++;
     event.status.store(EventState::Cancelled, std::memory_order_release);
     event.kevent->Clear(system.Kernel());
 

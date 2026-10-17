@@ -323,3 +323,47 @@ overhead and the source of the remaining stalls still need measurement. Startup
 and intentional pauses can
 produce gaps; late timer deadlines spanning a known pause are excluded.
 
+## GPU wait failure accounting
+
+The `429e1db` Unicorn Overlord run contains 965 ms of missing audio over 70.64
+seconds of reporting, with 850 ms concentrated in two windows. The near-full-scale
+and large-step PCM counters remain zero. Frame gaps of 869, 652, and 436 ms overlap
+audio submission gaps, while the corresponding append work takes 19--36 us.
+There are no timer-stall or slow-pipeline reports. Other frame gaps occur without
+audio starvation, so one correction cannot yet be claimed to resolve all lag.
+
+Source and release-binary inspection identify an internal pause path in NV event
+waiting: after three recorded failures, the fallback pauses guest execution and
+CoreTiming while waiting for the actual host GPU fence. Audio callbacks continue
+during this pause. The existing timer diagnostics intentionally exclude deadlines
+spanning a pause, so they cannot confirm or rule out this path in that phone run.
+
+Two failure-accounting errors are reproduced on the host: successful asynchronous
+completion does not reset the counter, and clearing an already completed or idle
+event increments it. These errors can make old or nonexistent failures trigger a
+later application pause. The next wait now resets the counter when the event is
+signalled, under the existing event mutex, and clearing counts a failure only
+when it cancels a pending wait. Three consecutive pending cancellations still
+enter the existing fallback and wait for the requested fence. No GPU completion
+is fabricated, and scheduling, graphics accuracy, and audio buffering are unchanged.
+
+Run the focused checks with:
+
+```sh
+python3 .ci/android/test-nvhost-events.py --sanitize
+```
+
+The harness compiles the production wait and clear methods with controlled event,
+syncpoint, and system stand-ins. Four cases fail against the previous code. All
+seven pass with the correction and address/undefined-behavior sanitizers, including
+checks that retain the fallback, requested fence, pause/resume, ready-fence fast
+path, and zero-timeout behavior. These checks do not model ioctl packing, Android
+scheduling, or Mali performance. The POCO workflow runs them before the APK build.
+
+The POCO build also logs `NV syncpoint fallback` when this path takes at least
+20 ms, separating pause acquisition from the host fence wait and total duration.
+Its clock reads occur only when entering that fallback. Test the same scene and
+settings and export diagnostics after a hitch. This is a demonstrated accounting
+fix; whether this path caused the observed phone stalls, and the amount of any
+audio or frame-time improvement, still require device measurements.
+

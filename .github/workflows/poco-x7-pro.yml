@@ -49,6 +49,8 @@ jobs:
           fetch-depth: 0
       - name: Test audio sink logic on host
         run: python3 .ci/android/test-audio-sink.py
+      - name: Test GPU wait failure accounting on host
+        run: python3 .ci/android/test-nvhost-events.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -116,4 +118,5 @@ jobs:
           path: artifacts/debug/*
           if-no-files-found: error
           retention-days: 90
+
 
