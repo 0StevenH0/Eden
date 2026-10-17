@@ -168,6 +168,19 @@ public:
         return short_reads.load(std::memory_order_relaxed);
     }
 
+    u64 GetAppendedFrames() const {
+        return appended_frames.load(std::memory_order_relaxed);
+    }
+    u64 GetRequestedFrames() const {
+        return requested_frames.load(std::memory_order_relaxed);
+    }
+    u64 GetDeliveredFrames() const {
+        return delivered_frames.load(std::memory_order_relaxed);
+    }
+    u64 GetUnderrunCallbackCount() const {
+        return underrun_callbacks.load(std::memory_order_relaxed);
+    }
+
     /**
      * Set the maximum buffer queue size.
      */
@@ -258,6 +271,11 @@ private:
     /// Playback starvation totals, reported outside the audio callback.
     std::atomic<u64> underrun_frames{};
     std::atomic<u64> short_reads{};
+    // Relaxed atomic counters avoid logging/locking on the real-time audio callback.
+    std::atomic<u64> appended_frames{};
+    std::atomic<u64> requested_frames{};
+    std::atomic<u64> delivered_frames{};
+    std::atomic<u64> underrun_callbacks{};
     /// The ring size for audio out buffers (usually 4, rarely 2 or 8)
     u32 max_queue_size{};
     /// Locks access to sample count tracking info
