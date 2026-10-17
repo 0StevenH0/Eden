@@ -69,9 +69,11 @@ struct System {
     bool paused = false;
     bool shutting_down = false;
     TestTiming timing;
+    u64 program_id = 0;
     bool IsPaused() const { return paused; }
     bool IsShuttingDown() const { return shutting_down; }
     TestTiming& CoreTiming() { return timing; }
+    u64 GetApplicationProcessProgramID() const { return program_id; }
 };
 }
 namespace Settings { float Volume() { return 1.0f; } }
@@ -193,6 +195,21 @@ void ShortRead() {
           "late samples did not complete the original buffer");
 }
 
+void SampleCountLeadIsGameSpecific() {
+    Core::System system;
+    SinkStream out(system, StreamType::Out);
+    Check(out.GetExpectedPlayedSampleCount() == TargetSampleCount * 5,
+          "other titles must retain their default audio lead");
+
+    system.program_id = 0x010069401ADB8000ULL;
+    Check(out.GetExpectedPlayedSampleCount() == TargetSampleCount * 25,
+          "Unicorn Overlord must use the experimental audio lead");
+
+    SinkStream in(system, StreamType::In);
+    Check(in.GetExpectedPlayedSampleCount() == TargetSampleCount * 5,
+          "audio input must retain the default lead");
+}
+
 void NoAdditionalData() {
     Core::System system;
     auto sink = std::make_unique<SDLSinkStream>(system, StreamType::Out);
@@ -261,6 +278,7 @@ int main() {
     run("surround downmix handoff", [] { Handoff(6, {100, 200, 0, 0, 0, 0}, {100, 200}); });
     run("partial-buffer underrun", Underrun);
     run("short read and recovery", ShortRead);
+    run("Unicorn Overlord-only sample lead", SampleCountLeadIsGameSpecific);
     run("SDL zero additional request", NoAdditionalData);
 #if HAS_COUNTERS
     run("SDL frame alignment and storage reuse", AlignedRequestAndReuse);
