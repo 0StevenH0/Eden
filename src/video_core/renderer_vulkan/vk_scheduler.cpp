@@ -26,6 +26,7 @@
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 #ifdef EDEN_POCOPHONE_X7_PRO
+#include "common/logging.h"
 #include "common/stall_timing.h"
 #endif
 

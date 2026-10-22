@@ -25,7 +25,7 @@
 #include "video_core/rasterizer_interface.h"
 
 #ifdef EDEN_POCOPHONE_X7_PRO
-#include "common/logging/log.h"
+#include "common/logging.h"
 #include "common/stall_timing.h"
 #endif
 

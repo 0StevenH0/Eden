@@ -10,7 +10,7 @@
 #include "core/hle/kernel/k_scheduler.h"
 
 #ifdef EDEN_POCOPHONE_X7_PRO
-#include "common/logging/log.h"
+#include "common/logging.h"
 #include "common/stall_timing.h"
 #endif
 
