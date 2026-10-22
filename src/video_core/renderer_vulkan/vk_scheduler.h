@@ -172,6 +172,10 @@ public:
     std::mutex submit_mutex;
 
 private:
+#ifdef EDEN_POCOPHONE_X7_PRO
+    std::int64_t last_submit_report_us{}; // Accessed only by VulkanWorker.
+#endif
+
     class Command {
     public:
         virtual ~Command() = default;

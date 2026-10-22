@@ -24,6 +24,11 @@
 #include "video_core/host1x/syncpoint_manager.h"
 #include "video_core/rasterizer_interface.h"
 
+#ifdef EDEN_POCOPHONE_X7_PRO
+#include "common/logging/log.h"
+#include "common/stall_timing.h"
+#endif
+
 namespace VideoCommon {
 
 class FenceBase {
@@ -34,8 +39,19 @@ public:
         return is_stubbed;
     }
 
+#ifdef EDEN_POCOPHONE_X7_PRO
+    std::int64_t QueuedAtUs() const {
+        return queued_at_us;
+    }
+#endif
+
 protected:
     bool is_stubbed;
+
+#ifdef EDEN_POCOPHONE_X7_PRO
+private:
+    const std::int64_t queued_at_us = Common::StallTiming<1>::NowUs();
+#endif
 };
 
 template <typename Traits>
@@ -72,12 +88,21 @@ public:
     }
 
     void SignalFence(std::function<void()>&& func) {
+#ifdef EDEN_POCOPHONE_X7_PRO
+        Common::StallTiming<4> timing;
+#endif
         const bool delay_fence = Settings::IsGPUFenceBehaviorDefault() ? Settings::IsGPULevelHigh() : Settings::IsGPUFenceBehaviorBalanced() || Settings::IsGPUFenceBehaviorAccurate();
         const bool should_flush = ShouldFlush();
         if constexpr (!can_async_check) {
             TryReleasePendingFences<false>();
         }
+#ifdef EDEN_POCOPHONE_X7_PRO
+        timing.Record(1);
+#endif
         CommitAsyncFlushes();
+#ifdef EDEN_POCOPHONE_X7_PRO
+        timing.Record(2);
+#endif
         TFence new_fence = CreateFence(!should_flush);
         if constexpr (can_async_check) {
             guard.lock();
@@ -98,7 +123,20 @@ public:
             guard.unlock();
             cv.notify_all();
         }
+#ifdef EDEN_POCOPHONE_X7_PRO
+        timing.Record(3);
+#endif
         rasterizer.InvalidateGPUCache();
+#ifdef EDEN_POCOPHONE_X7_PRO
+        timing.Record(4);
+        if (timing.ShouldReport(last_enqueue_report_us)) {
+            LOG_INFO(Render,
+                     "GPU fence enqueue: host_us={} check_us={} commit_us={} queue_us={} "
+                     "invalidate_us={} total_us={} flush={} delayed={}",
+                     timing.StartUs(), timing.StageUs(0), timing.StageUs(1), timing.StageUs(2),
+                     timing.StageUs(3), timing.TotalUs(), should_flush, delay_fence);
+        }
+#endif
     }
 
     void SignalSyncPoint(u32 value) {
@@ -199,6 +237,9 @@ private:
 
         TFence current_fence;
         std::deque<std::function<void()>> current_operations;
+#ifdef EDEN_POCOPHONE_X7_PRO
+        std::int64_t last_release_report_us{};
+#endif
         while (!stop_token.stop_requested()) {
             {
                 std::unique_lock lock(guard);
@@ -211,17 +252,42 @@ private:
                 fences.pop();
                 pending_operations.pop_front();
             }
+#ifdef EDEN_POCOPHONE_X7_PRO
+            Common::StallTiming<5> timing{current_fence->QueuedAtUs()};
+            timing.Record(1);
+            const bool stubbed = current_fence->IsStubbed();
+#endif
             if (!current_fence->IsStubbed()) {
                 WaitFence(current_fence);
             }
+#ifdef EDEN_POCOPHONE_X7_PRO
+            timing.Record(2);
+#endif
             PopAsyncFlushes();
+#ifdef EDEN_POCOPHONE_X7_PRO
+            timing.Record(3);
+#endif
             for (auto& operation : current_operations) {
                 operation();
             }
+#ifdef EDEN_POCOPHONE_X7_PRO
+            timing.Record(4);
+#endif
             {
                 std::unique_lock lock(ring_guard);
                 delayed_destruction_ring.Push(std::move(current_fence));
             }
+#ifdef EDEN_POCOPHONE_X7_PRO
+            timing.Record(5);
+            if (timing.ShouldReport(last_release_report_us)) {
+                LOG_INFO(Render,
+                         "GPU fence release: host_us={} queued_us={} wait_us={} cache_us={} "
+                         "signal_us={} retire_us={} total_us={} stubbed={} operations={}",
+                         timing.StartUs(), timing.StageUs(0), timing.StageUs(1), timing.StageUs(2),
+                         timing.StageUs(3), timing.StageUs(4), timing.TotalUs(), stubbed,
+                         current_operations.size());
+            }
+#endif
         }
     }
 
@@ -238,12 +304,34 @@ private:
     }
 
     void PopAsyncFlushes() {
+#ifdef EDEN_POCOPHONE_X7_PRO
+        Common::StallTiming<4> timing;
+#endif
         {
             std::scoped_lock lock{buffer_cache.mutex, texture_cache.mutex};
+#ifdef EDEN_POCOPHONE_X7_PRO
+            timing.Record(1);
+#endif
             texture_cache.PopAsyncFlushes();
+#ifdef EDEN_POCOPHONE_X7_PRO
+            timing.Record(2);
+#endif
             buffer_cache.PopAsyncFlushes();
+#ifdef EDEN_POCOPHONE_X7_PRO
+            timing.Record(3);
+#endif
         }
         query_cache.PopAsyncFlushes();
+#ifdef EDEN_POCOPHONE_X7_PRO
+        timing.Record(4);
+        if (timing.ShouldReport(last_cache_report_us)) {
+            LOG_INFO(Render,
+                     "GPU cache release: host_us={} lock_us={} texture_us={} buffer_us={} "
+                     "query_us={} total_us={}",
+                     timing.StartUs(), timing.StageUs(0), timing.StageUs(1), timing.StageUs(2),
+                     timing.StageUs(3), timing.TotalUs());
+        }
+#endif
     }
 
     void CommitAsyncFlushes() {
@@ -262,6 +350,11 @@ private:
     std::mutex guard;
     std::mutex ring_guard;
     std::condition_variable cv;
+
+#ifdef EDEN_POCOPHONE_X7_PRO
+    std::int64_t last_enqueue_report_us{};
+    std::int64_t last_cache_report_us{};
+#endif
 
     std::jthread fence_thread;
 

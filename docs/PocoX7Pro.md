@@ -367,3 +367,54 @@ settings and export diagnostics after a hitch. This is a demonstrated accounting
 fix; whether this path caused the observed phone stalls, and the amount of any
 audio or frame-time improvement, still require device measurements.
 
+## Remaining GPU and kernel timer stalls
+
+The subsequent `073654e` Unicorn Overlord log confirms two fallback host waits of
+566 ms and 332 ms. The pause-acquisition work takes only 49 us and 82 us. The two
+overlapping audio-report windows account for 865 ms of the run's 1,000 ms of missing
+audio over 68.393 seconds. This confirms the fallback contributes to the dropouts;
+it does not establish whether GPU execution, queued submissions, cache readback,
+host scheduling, or completion callbacks are delaying the signal. There are no
+slow shader compilation reports or PCM clipping/large-step flags in this run.
+
+A separate `KHardwareTimer::Callback` takes 104 ms and overlaps another 90 ms of
+missing audio. The following HID event is late, but its own work takes only 7 us.
+The exported exit history has no new native crash record for this build. The
+ending guest panic and memory-unmap assertion remain unresolved; they cannot be
+classified as a spontaneous gameplay crash without knowing how the session ended.
+
+The next POCO diagnostics separate these stages without changing fence completion,
+fallback pauses, cache flush ordering, audio buffering, or scheduler policy:
+
+| Log marker | Measured stages |
+| --- | --- |
+| `Vulkan submission stall` | Time from recording a submission callback to executing it, command-buffer preparation and submit callback, queue-submit mutex acquisition, and driver submission |
+| `GPU fence enqueue` | Flush checks, cache commit, fence queueing and command flushing, and cache invalidation |
+| `GPU fence release` | Fence creation to dequeue, completion wait, cache release, host signalling callbacks, and deferred retirement |
+| `GPU cache release` | Buffer/texture cache lock acquisition, texture readback, buffer readback, and query release |
+| `Kernel timer stall` | Scheduler lock acquisition, timer lock acquisition, expired-task handling, and scheduler unlock/rescheduling |
+
+Each category reports durations of at least 20 ms, at most four times per second.
+`host_us` is the monotonic start timestamp; add `total_us` to obtain the end. A fence's
+`queued_us` includes backend queueing and time behind earlier fences. A submission's
+`queued_us` includes earlier commands in the same worker chunk and the worker queue.
+Neither field is a measurement of physical GPU utilization. Cache `query_us` also
+includes releasing the buffer/texture locks; timer `tasks_us` includes releasing the
+timer lock. Reports are emitted after those measured locks are released.
+
+All new sampling is compiled only into the POCO flavor. It adds five clock reads per
+kernel timer callback, one per fence creation, five per asynchronous fence release,
+five per cache release, and five per queue submission. The stage arrays have fixed
+size and do not allocate. Fence enqueueing adds another five clock reads, covering
+cache work before fence creation. Device overhead and any change in frame times still need
+measurement; this is an attribution build, not a demonstrated performance fix.
+
+For the next same-scene comparison, first set **GPU Clocks: Normal** in the game's
+settings. The logged Boost setting changes the emulated GPU timestamp rate; it does
+not set the phone's physical GPU frequency. Then compare **0.75x resolution** with
+1x, changing one setting at a time. Keep Handheld, Vulkan, NCE, 100% speed, caches,
+Accurate GPU mode, and default fence/DMA behavior for the baseline. Fast GPU mode or
+disabled reactive flushing can be tested separately, reverting if rendering or
+stability changes. The prior log does not justify enabling asynchronous shaders or
+changing the Switch firmware to fix these particular stalls.
+

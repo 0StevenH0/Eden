@@ -111,6 +111,7 @@ add_library(
     sparse_large_vector.h
     stb.cpp
     stb.h
+    stall_timing.h
     steady_clock.cpp
     steady_clock.h
     stream.cpp

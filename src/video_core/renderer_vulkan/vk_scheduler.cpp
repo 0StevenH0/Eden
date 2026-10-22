@@ -25,6 +25,10 @@
 #include "video_core/vulkan_common/vulkan_device.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
+#ifdef EDEN_POCOPHONE_X7_PRO
+#include "common/stall_timing.h"
+#endif
+
 namespace Vulkan {
 
 void Scheduler::CommandChunk::ExecuteAll(vk::CommandBuffer cmdbuf,
@@ -344,8 +348,18 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
     InvalidateState();
 
     const u64 signal_value = master_semaphore->NextTick();
+#ifdef EDEN_POCOPHONE_X7_PRO
+    const auto queued_at_us = Common::StallTiming<4>::NowUs();
+#endif
     RecordWithUploadBuffer([signal_semaphore, wait_semaphore, signal_value,
+#ifdef EDEN_POCOPHONE_X7_PRO
+                            queued_at_us,
+#endif
                             this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
+#ifdef EDEN_POCOPHONE_X7_PRO
+        Common::StallTiming<4> timing{queued_at_us};
+        timing.Record(1);
+#endif
         static constexpr VkMemoryBarrier WRITE_BARRIER{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
             .pNext = nullptr,
@@ -360,24 +374,45 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
             on_submit();
         }
 
-        std::scoped_lock lock{submit_mutex};
-        switch (const VkResult result = master_semaphore->SubmitQueue(
-                    cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value)) {
-        case VK_SUCCESS:
-            // Log successful queue submission
-            if (GPU::Logging::IsActive() &&
-                Settings::values.gpu_log_vulkan_calls.GetValue()) {
-                GPU::Logging::GPULogger::GetInstance().LogVulkanCall(
-                    "vkQueueSubmit", "", VK_SUCCESS);
+#ifdef EDEN_POCOPHONE_X7_PRO
+        timing.Record(2);
+#endif
+        {
+            std::scoped_lock lock{submit_mutex};
+#ifdef EDEN_POCOPHONE_X7_PRO
+            timing.Record(3);
+#endif
+            const VkResult result = master_semaphore->SubmitQueue(
+                cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value);
+#ifdef EDEN_POCOPHONE_X7_PRO
+            timing.Record(4);
+#endif
+            switch (result) {
+            case VK_SUCCESS:
+                // Log successful queue submission
+                if (GPU::Logging::IsActive() &&
+                    Settings::values.gpu_log_vulkan_calls.GetValue()) {
+                    GPU::Logging::GPULogger::GetInstance().LogVulkanCall(
+                        "vkQueueSubmit", "", VK_SUCCESS);
+                }
+                break;
+            case VK_ERROR_DEVICE_LOST:
+                device.ReportLoss();
+                [[fallthrough]];
+            default:
+                vk::Check(result);
+                break;
             }
-            break;
-        case VK_ERROR_DEVICE_LOST:
-            device.ReportLoss();
-            [[fallthrough]];
-        default:
-            vk::Check(result);
-            break;
         }
+#ifdef EDEN_POCOPHONE_X7_PRO
+        if (timing.ShouldReport(last_submit_report_us)) {
+            LOG_INFO(Render_Vulkan,
+                     "Vulkan submission stall: host_us={} tick={} queued_us={} prepare_us={} "
+                     "lock_us={} submit_us={} total_us={}",
+                     timing.StartUs(), signal_value, timing.StageUs(0), timing.StageUs(1),
+                     timing.StageUs(2), timing.StageUs(3), timing.TotalUs());
+        }
+#endif
     });
     chunk->MarkSubmit();
     DispatchWork();

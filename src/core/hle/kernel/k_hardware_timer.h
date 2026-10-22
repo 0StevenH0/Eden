@@ -45,6 +45,9 @@ private:
     // Absolute time in nanoseconds
     s64 m_wakeup_time{(std::numeric_limits<s64>::max)()};
     std::shared_ptr<Core::Timing::EventType> m_event_type{};
+#ifdef EDEN_POCOPHONE_X7_PRO
+    std::int64_t m_last_stall_report_us{};
+#endif
 };
 
 } // namespace Kernel
