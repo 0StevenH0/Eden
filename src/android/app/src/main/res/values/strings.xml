@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
 
+    <string name="poco_performance_profile">Apply POCO X7 Pro performance profile</string>
+    <string name="poco_performance_profile_global_description">Set global performance settings: 0.5× resolution, handheld mode, bilinear scaling, cached shaders, and no extra effects. Existing game overrides, audio settings, and controls are kept. Stop emulation before applying.</string>
+    <string name="poco_performance_profile_game_description">Set performance settings for this game: 0.5× resolution, handheld mode, bilinear scaling, cached shaders, and no extra effects. Audio settings and controls are kept. Stop emulation before applying.</string>
+    <string name="poco_performance_profile_applied">POCO performance profile saved</string>
+    <string name="poco_performance_profile_stop_game">Stop emulation before applying the profile</string>
+
     <!-- General application strings -->
     <string name="app_name" translatable="false">Eden</string>
     <string name="app_disclaimer">This software will run games for the Nintendo Switch game console. No game titles or keys are included.&lt;br /&gt;&lt;br /&gt;Before you begin, please locate your <![CDATA[<b> prod.keys </b>]]> file on your device storage.&lt;br /&gt;&lt;br /&gt;<![CDATA[<a href=\"https://git.eden-emu.dev/eden-emu/eden/src/branch/master/docs/user/QuickStart.md\">Learn more</a>]]></string>

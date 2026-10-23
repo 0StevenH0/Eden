@@ -84,29 +84,62 @@ allowed CPU set is respected. If topology cannot be read, placement stays unrest
 Compute-pipeline errors report the actual GPU model instead of labelling every
 driver failure as an Adreno error.
 
-## Starting settings
+## POCO X7 Pro performance profile
 
-Defaults favor a working rendering baseline. They are normal settings and can be
-changed globally or per game; explicit saved overrides are preserved.
+New global configurations in the POCO flavor automatically receive the performance
+profile. Upgrading an existing installation does not overwrite its configuration,
+including values saved with the old default flag. To apply it to an existing
+installation, stop emulation and open **Settings > Apply POCO X7 Pro performance
+profile**. The same action in a game's settings applies only to that game. A global
+apply leaves existing game overrides intact; apply in the game's settings as well
+if those overrides should use the profile. Resetting all global settings also
+creates a new configuration with this profile.
 
-| Setting | Default | Reason |
+The profile is a starting point, not a measured optimum for every title. It writes
+ordinary editable settings and saves immediately. Subsequent edits survive reload;
+there is no launch-time reapplication. It always selects **0.5x**, never 0.25x, and
+does not dynamically reduce resolution. Higher resolutions can be selected manually.
+It does not lock the resolution menu or impose a floor on later manual changes.
+
+| Setting | Profile | Reason |
 | --- | --- | --- |
-| CPU backend | NCE for supported titles | Existing native execution path |
-| Graphics API | Vulkan | Existing Android backend |
-| Console mode | Handheld | Existing lower-resolution workload |
-| Resolution | 1x | Baseline for comparing game compatibility |
-| GPU accuracy | High | Correct synchronization before testing lower accuracy |
-| Reactive flushing | On | CPU/GPU readback correctness baseline |
-| ASTC recompression | Uncompressed | Retain native ASTC where supported; avoid BC recompression assumptions |
-| VRAM usage | Conservative | Existing conservative cache policy |
-| Force maximum GPU clocks | Off | Avoid extra GPU work from the clock-boost path |
-| Shader and driver pipeline caches | On | Existing persistent compilation caches |
+| CPU backend / accuracy | NCE where supported / Auto | Preserve native execution without enabling unsafe CPU accuracy |
+| Multicore / fastmem | On | Retain existing CPU acceleration |
+| Graphics API / driver | Vulkan / system Mali driver | POCO flavor already uses the stock driver |
+| Console mode / resolution | Handheld / 0.5x | Half width and height: a scalable render target has one quarter of the 1x pixels |
+| Scaling / anti-aliasing | Bilinear / None | Low-cost presentation without an extra AA pass |
+| Anisotropy / sample shading | Game default / 0 | No forced anisotropy increase or extra sample shading |
+| Frame generation / post effects | Off / Off | Avoid extra processing; saved effect chains are retained |
+| Speed limit / guest CPU and GPU clocks | 100% / Normal | Normal game timing; GPU Boost is not a physical phone clock control |
+| Guest RAM / VRAM cache | 4 GB / Conservative | Avoid unnecessary pressure on the 8 GB model; guest RAM is not phone RAM |
+| GPU accuracy / reactive flushing | Accurate / On | Preserve completion and CPU/GPU readback behavior |
+| DMA / fence behavior | Default / Default | Preserve the existing synchronization policy |
+| Asynchronous GPU / presentation | On / On | Existing threaded GPU and presentation paths |
+| Shader / driver pipeline caches | On / On | Reuse compiled pipelines on later runs |
+| Pipeline workers | 2 | Existing low-contention Android default |
+| Asynchronous shaders | Off | This path can skip draws before shaders are ready |
+| ASTC / recompression | GPU fallback / Uncompressed | Native ASTC remains compressed on supported Mali hardware; avoid BC recompression assumptions |
+| Video decoding | CPU | Retain cutscenes and the existing Android decode path |
+| VSync / frame pacing | FIFO / Auto | Retain pacing without forcing a higher presentation target |
+| Force maximum GPU clocks | Off | Avoid the extra GPU workload used by that feature |
 
-Only GPU accuracy and reactive flushing change from the upstream Android defaults.
-High accuracy can cost FPS; it is a correctness choice, not a claimed speedup.
-For a GPU-bound title, compare 0.75x and 0.5x resolution before enabling unsafe CPU
-settings. Leave memory expansion, driver workarounds, and unsupported feature
-overrides out of the baseline comparison.
+Audio backend, volume, buffering, input profiles, language, game data, and saved
+shader caches are untouched. A title that requires expanded guest RAM for a mod
+will need that per-game override restored after explicitly applying the profile.
+Vulkan capability checks and driver workarounds are unchanged.
+
+Accurate GPU mode is intentional: in `FenceManager::SignalFence`, Fast mode with
+default fence behavior can invoke a guest completion callback before the queued
+GPU fence completes. Disabling readback protections is not a suitable universal
+fix for the observed GPU waits. The 0.5x workload reduction is a concrete change;
+its effect on FPS and audio underruns still needs phone measurements.
+
+Run `python3 .ci/android/test-poco-profile.py --sanitize` with fmt development
+headers installed. It compiles the production profile and settings classes and
+the production generic INI read/write methods with an in-memory storage backend.
+It covers global/game isolation, persistence, the 0.5x selection, preserved audio,
+controller and effect-chain data, and later user edits. Android UI, disk I/O, first
+installation, and performance still require the APK/device checks below.
 
 ## Validation on the phone
 
@@ -417,4 +450,25 @@ Accurate GPU mode, and default fence/DMA behavior for the baseline. Fast GPU mod
 disabled reactive flushing can be tested separately, reverting if rendering or
 stability changes. The prior log does not justify enabling asynchronous shaders or
 changing the Switch firmware to fix these particular stalls.
+
+## Performance follow-up priorities (October 23, 2026)
+
+These are source-review candidates, not additional performance fixes in this
+profile change. The latest branch already contains attribution markers; a log
+from that build at the same scene is needed before changing synchronization.
+
+| Priority | Evidence and relevant code | Proposed next work | Validation |
+| --- | --- | --- | --- |
+| 1. GPU fence and cache latency | Prior device runs show 566/332 ms host fence waits overlapping audio starvation. `src/video_core/fence_manager.h` and `renderer_vulkan/vk_scheduler.cpp` now separate queueing, submit, completion, and cache-release stages. | Use those markers to identify the stage first. If readback dominates, investigate reducing redundant readbacks or shortening cache-lock ownership while preserving ordering. If driver submit or GPU completion dominates, inspect the actual submitted workload. | Same save/scene, warm cache, compare 1x/0.75x/0.5x; record p95/p99 frame time and underrun milliseconds, not FPS alone. |
+| 2. Kernel timer contention | A 104 ms timer callback overlaps a further audio gap. `src/core/hle/kernel/k_hardware_timer.cpp` measures scheduler lock, timer lock, task handling, and rescheduling separately. | Trace the delayed stage and its lock owner; reduce the demonstrated critical section if possible. Do not remove locking or change timer ordering without a reproducer. | Long-play synchronization/stability checks plus timer and audio timestamps. |
+| 3. Better Android performance hints | `src/common/adpf.cpp::ReportFrameInterval` sends inter-frame wall time, capped at four target intervals, under a shared session mutex. That does not separate useful CPU/GPU work from pacing or pauses. | Audit the report call sites, report actual work duration, refresh the target for the real game cadence, and reset timing across pause/resume. Use Android 15 CPU/GPU duration support where available. This is a candidate for reducing unnecessary boosting, not a proven bottleneck. | Compare frequency, thermals, scheduling and p99 frame time at 30/60 FPS, with hints enabled and with the existing affinity fallback. |
+| 4. Thermal-aware sustained load | The profile avoids forced boost and extra effects, but the reviewed scheduling path does not adapt work from thermal headroom. | Add low-frequency thermal telemetry first; then evaluate a policy that reduces background compiler concurrency or optional work as the phone heats. Any future dynamic-resolution option must keep the user's 0.5x floor and preserve 100% game speed. | At least 15-minute runs, comparable starting temperatures, both 8/12 GB models where available. |
+| 5. Shader worker policy and diagnostic cost | `GetTotalPipelineWorkers` clamps to 2–8, so its later zero-worker branch is unreachable. Pipeline jobs already use background placement. POCO stall instrumentation samples clocks in frequent timer, fence and submission paths. | Evaluate one/two/four compile workers for cold versus warm caches; do not blindly use all eight cores. Measure diagnostics-on/off cost before adding an opt-in detailed-logging mode. | Separate shader warm-up time from gameplay frame times; retain enough diagnostics to explain regressions. |
+
+Android API references: [performance-hint sessions](https://developer.android.com/reference/android/os/PerformanceHintManager.Session),
+[thermal guidance](https://developer.android.com/games/optimize/adpf/thermal), and
+[ADPF best practices](https://developer.android.com/games/optimize/adpf/best-practices-adpf).
+The proposed benefits above are engineering hypotheses based on the source and
+prior traces. No new phone benchmark, thermal trace, or latest-build gameplay log
+was supplied with this profile request.
 

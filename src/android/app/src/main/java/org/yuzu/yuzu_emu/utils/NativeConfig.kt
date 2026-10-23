@@ -36,6 +36,10 @@ object NativeConfig {
     @Synchronized
     external fun saveGlobalConfig()
 
+    /** Applies and saves the POCO performance profile to the current scope while stopped. */
+    @Synchronized
+    external fun applyPocoPerformanceProfile(): Boolean
+
     /**
      * Creates per-game config for the specified parameters. Must be unloaded once per-game config
      * is closed with [unloadPerGameConfig]. All switchable values that [NativeConfig] gets/sets

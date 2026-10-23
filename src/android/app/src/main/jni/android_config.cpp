@@ -9,11 +9,28 @@
 #include "android_settings.h"
 #include "common/settings_setting.h"
 
+#ifdef EDEN_POCOPHONE_X7_PRO
+#include "common/fs/fs.h"
+#include "poco_performance_profile.h"
+#endif
+
 AndroidConfig::AndroidConfig(const std::string& config_name, ConfigType config_type)
     : Config(config_type) {
+#ifdef EDEN_POCOPHONE_X7_PRO
+    const bool new_global_config =
+        config_type == ConfigType::GlobalConfig &&
+        !Common::FS::Exists(Common::FS::GetEdenPath(Common::FS::EdenPath::ConfigDir) /
+                           (config_name + ".ini"));
+#endif
     Initialize(config_name);
     if (config_type != ConfigType::InputProfile) {
         ReadAndroidValues();
+#ifdef EDEN_POCOPHONE_X7_PRO
+        if (new_global_config) {
+            PocoX7Pro::ApplyPerformanceProfile(true);
+            SaveValues();
+        }
+#endif
         SaveAndroidValues();
     }
 }

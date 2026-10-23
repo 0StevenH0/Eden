@@ -6,6 +6,7 @@ package org.yuzu.yuzu_emu.features.settings.ui
 import android.annotation.SuppressLint
 import android.os.Build
 import android.widget.Toast
+import org.yuzu.yuzu_emu.BuildConfig
 import org.yuzu.yuzu_emu.NativeLibrary
 import org.yuzu.yuzu_emu.R
 import org.yuzu.yuzu_emu.YuzuApplication
@@ -405,6 +406,31 @@ class SettingsFragmentPresenter(
 
     private fun addConfigSettings(sl: ArrayList<SettingsItem>) {
         sl.apply {
+            if (BuildConfig.FLAVOR == "pocoX7Pro") {
+                add(
+                    RunnableSetting(
+                        titleId = R.string.poco_performance_profile,
+                        descriptionId = if (settingsViewModel.game == null) {
+                            R.string.poco_performance_profile_global_description
+                        } else {
+                            R.string.poco_performance_profile_game_description
+                        },
+                        isRunnable = !NativeLibrary.isRunning(),
+                        iconId = R.drawable.ic_system_settings
+                    ) {
+                        val applied = NativeConfig.applyPocoPerformanceProfile()
+                        Toast.makeText(
+                            context,
+                            if (applied) R.string.poco_performance_profile_applied
+                            else R.string.poco_performance_profile_stop_game,
+                            Toast.LENGTH_SHORT
+                        ).show()
+                        if (applied) {
+                            settingsViewModel.setReloadListAndNotifyDataset(true)
+                        }
+                    }
+                )
+            }
             add(
                 SubmenuSetting(
                     titleId = R.string.preferences_system,

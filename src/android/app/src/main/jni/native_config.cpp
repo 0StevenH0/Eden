@@ -15,6 +15,9 @@
 #include "frontend_common/config.h"
 #include "frontend_common/settings_generator.h"
 #include "native.h"
+#ifdef EDEN_POCOPHONE_X7_PRO
+#include "poco_performance_profile.h"
+#endif
 #ifdef HAS_RESHADE
 #include "video_core/post_processing/fx_chain.h"
 #endif
@@ -65,6 +68,25 @@ void Java_org_yuzu_yuzu_1emu_utils_NativeConfig_reloadGlobalConfig(JNIEnv* env, 
 
 void Java_org_yuzu_yuzu_1emu_utils_NativeConfig_saveGlobalConfig(JNIEnv* env, jobject obj) {
     global_config->AndroidConfig::SaveAllValues();
+}
+
+jboolean Java_org_yuzu_yuzu_1emu_utils_NativeConfig_applyPocoPerformanceProfile(JNIEnv* env,
+                                                                            jobject obj) {
+#ifdef EDEN_POCOPHONE_X7_PRO
+    if (EmulationSession::GetInstance().IsRunning() ||
+        EmulationSession::GetInstance().System().IsPoweredOn() || !global_config) {
+        return false;
+    }
+    PocoX7Pro::ApplyPerformanceProfile(per_game_config == nullptr);
+    auto& config = per_game_config ? per_game_config : global_config;
+    config->SaveAllValues();
+#ifdef HAS_RESHADE
+    VideoCore::FxChain::Instance().LoadFromSettings();
+#endif
+    return true;
+#else
+    return false;
+#endif
 }
 
 void Java_org_yuzu_yuzu_1emu_utils_NativeConfig_initializePerGameConfig(JNIEnv* env, jobject obj,
